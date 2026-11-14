@@ -62,3 +62,37 @@ export function canDig(x: number, z: number) {
   const inHouse = x > HOUSE.x1 - 0.3 && x < HOUSE.x2 + 0.3 && z > HOUSE.z1 - 0.3 && z < HOUSE.z2 + 0.3;
   return !inHouse && !inPond(x, z, 0.5) && Math.abs(x) < 40 && Math.abs(z) < 40;
 }
+
+// ---- Deep holes & vertical movement ----
+export type HoleShape = { x: number; z: number; r: number };
+export const HOLE_DEPTH = 2.2;
+export const HOLE_START_R = 0.6;
+export const HOLE_MAX_R = 1.4;
+export const GRAVITY = 20;
+export const JUMP = 5.5; // normal hop
+export const CLIMB = 10; // jump from a hole bottom: enough to reach the rim
+export type Body = { x: number; y: number; z: number; vy: number };
+
+export function holeAt(holes: HoleShape[], x: number, z: number) {
+  return holes.find((h) => h.r > RADIUS && Math.hypot(x - h.x, z - h.z) < h.r - RADIUS * 0.5);
+}
+
+/** One physics step: horizontal move (walls of a hole block you while below ground), gravity, jump. */
+export function step(b: Body, dx: number, dz: number, jump: boolean, holes: HoleShape[], dt: number): Body {
+  let { x, y, z, vy } = b;
+  if (y < -0.05) {
+    const h = holes.find((h) => Math.hypot(x - h.x, z - h.z) < h.r + 0.01);
+    const fits = (px: number, pz: number) => !h || Math.hypot(px - h.x, pz - h.z) <= h.r - RADIUS * 0.5;
+    if (fits(x + dx, z)) x += dx;
+    if (fits(x, z + dz)) z += dz;
+  } else {
+    ({ x, z } = move(x, z, dx, dz));
+  }
+  const ground = holeAt(holes, x, z) ? -HOLE_DEPTH : 0;
+  const onGround = y <= ground + 0.001 && vy <= 0;
+  if (onGround && jump) vy = ground < 0 ? CLIMB : JUMP;
+  vy -= GRAVITY * dt;
+  y += vy * dt;
+  if (y <= ground) { y = ground; vy = 0; }
+  return { x, y, z, vy };
+}

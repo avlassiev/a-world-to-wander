@@ -2,7 +2,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, Lightformer, PointerLockControls, Sky } from "@react-three/drei";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, move, ponds, canDig, DIG_REACH, MAX_HOLES } from "./world";
+import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, canDig, DIG_REACH, MAX_HOLES, step, HOLE_DEPTH, HOLE_START_R, HOLE_MAX_R, type Body } from "./world";
 
 function canvasTex(draw: (c: CanvasRenderingContext2D) => void, repeat: number) {
   const cv = document.createElement("canvas");
@@ -219,10 +219,10 @@ function Growth() {
   );
 }
 
-function Player({ onDig }: { onDig: (x: number, z: number) => void }) {
+function Player({ onDig, holes }: { onDig: (x: number, z: number) => void; holes: React.RefObject<Hole[]> }) {
   const { camera } = useThree();
   const keys = useRef<Record<string, boolean>>({});
-  const pos = useRef({ x: 0, z: 6 });
+  const pos = useRef<Body>({ x: 0, y: 0, z: 6, vy: 0 });
   useEffect(() => {
     camera.position.set(0, EYE, 6);
     camera.lookAt(0, EYE, -8);
@@ -246,28 +246,40 @@ function Player({ onDig }: { onDig: (x: number, z: number) => void }) {
     camera.getWorldDirection(f); f.y = 0; f.normalize();
     r.crossVectors(f, camera.up).normalize();
     const mx = (f.x * fw + r.x * st) * SPEED * dt, mz = (f.z * fw + r.z * st) * SPEED * dt;
-    pos.current = move(pos.current.x, pos.current.z, mx, mz);
-    camera.position.set(pos.current.x, EYE, pos.current.z);
+    pos.current = step(pos.current, mx, mz, !!k["Space"], holes.current, dt);
+    camera.position.set(pos.current.x, pos.current.y + EYE, pos.current.z);
   });
   return null;
 }
 
 type Hole = { x: number; z: number; r: number; id: number };
+const holeMask = new THREE.MeshBasicMaterial({
+  colorWrite: false, depthWrite: false, stencilWrite: true, stencilRef: 1,
+  stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp,
+});
 function Holes({ holes }: { holes: Hole[] }) {
   return (
     <>
       {holes.map((h) => (
         <group key={h.id} position={[h.x, 0, h.z]}>
+          {/* cuts the grass so you can see down into the hole */}
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]} material={holeMask} renderOrder={-1}>
+            <circleGeometry args={[h.r, 32]} />
+          </mesh>
+          <mesh position={[0, -HOLE_DEPTH / 2, 0]}>
+            <cylinderGeometry args={[h.r, h.r * 0.9, HOLE_DEPTH, 32, 1, true]} />
+            <meshStandardMaterial color="#5a3b22" side={THREE.BackSide} />
+          </mesh>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -HOLE_DEPTH + 0.01, 0]}>
+            <circleGeometry args={[h.r * 0.9, 32]} />
+            <meshStandardMaterial color="#3a2614" />
+          </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
-            <ringGeometry args={[h.r, h.r + 0.25, 24]} />
+            <ringGeometry args={[h.r * 0.96, h.r + 0.25, 32]} />
             <meshStandardMaterial color="#6b4a2b" />
           </mesh>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.031, 0]}>
-            <circleGeometry args={[h.r, 24]} />
-            <meshStandardMaterial color="#2a1a0e" />
-          </mesh>
-          <mesh position={[h.r + 0.35, 0.08, 0]} castShadow>
-            <sphereGeometry args={[0.22, 8, 6]} />
+          <mesh position={[h.r + 0.45, 0.12, 0]} castShadow>
+            <sphereGeometry args={[0.3, 8, 6]} />
             <meshStandardMaterial color="#7a5533" flatShading />
           </mesh>
         </group>
@@ -286,18 +298,20 @@ export default function World() {
   const [ready, setReady] = useState(false);
   const [locked, setLocked] = useState(false);
   const [holes, setHoles] = useState<Hole[]>([]);
+  const holesRef = useRef<Hole[]>([]);
+  holesRef.current = holes;
   const onDig = useCallback((x: number, z: number) => {
     if (!canDig(x, z)) return;
     setHoles((hs) => {
       const near = hs.find((h) => Math.hypot(h.x - x, h.z - z) < h.r + 0.2);
-      if (near) return hs.map((h) => (h === near ? { ...h, r: Math.min(h.r + 0.15, 1.2) } : h));
-      return [...hs, { x, z, r: 0.45, id: Date.now() + Math.random() }].slice(-MAX_HOLES);
+      if (near) return hs.map((h) => (h === near ? { ...h, r: Math.min(h.r + 0.2, HOLE_MAX_R) } : h));
+      return [...hs, { x, z, r: HOLE_START_R, id: Date.now() + Math.random() }].slice(-MAX_HOLES);
     });
   }, []);
   const { grass } = useTextures();
   return (
     <div className="game-root" data-scene-ready={ready ? "" : undefined}>
-      <Canvas shadows camera={{ fov: 70, near: 0.05, far: 200 }}>
+      <Canvas shadows gl={{ stencil: true }} camera={{ fov: 70, near: 0.05, far: 200 }}>
         <Sky sunPosition={[30, 20, 10]} turbidity={4} />
         <fog attach="fog" args={["#cfe3ec", 30, 90]} />
         <hemisphereLight args={["#dff1ff", "#5a6b3a", 0.6]} />
@@ -309,7 +323,7 @@ export default function World() {
         </Environment>
         <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[200, 200]} />
-          <meshStandardMaterial map={grass} />
+          <meshStandardMaterial map={grass} stencilWrite stencilRef={1} stencilWriteMask={0} stencilFunc={THREE.NotEqualStencilFunc} />
         </mesh>
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, -1]} receiveShadow>
           <planeGeometry args={[1.4, 8]} />
@@ -318,7 +332,7 @@ export default function World() {
         <House />
         <Ponds />
         <Growth />
-        <Player onDig={onDig} />
+        <Player onDig={onDig} holes={holesRef} />
         <Holes holes={holes} />
         <PointerLockControls onLock={() => setLocked(true)} onUnlock={() => setLocked(false)} />
         <Ready onReady={() => setReady(true)} />
@@ -327,7 +341,7 @@ export default function World() {
         <div className="game-overlay">
           <h1>Домик в лесу</h1>
           <p>Нажмите, чтобы войти в мир</p>
-          <p className="hint">W A S D — ходить · мышь — смотреть · E — копать · Esc — пауза</p>
+          <p className="hint">W A S D — ходить · мышь — смотреть · E — копать · пробел — прыжок · Esc — пауза</p>
         </div>
       )}
       {locked && <div className="game-crosshair" />}
