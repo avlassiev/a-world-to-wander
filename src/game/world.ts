@@ -27,6 +27,7 @@ export const furniture: Box[] = [
 const solids = [...walls, ...furniture];
 
 function hits(x: number, z: number) {
+  if (inPond(x, z, RADIUS)) return true;
   return solids.some((b) => x + RADIUS > b.x1 && x - RADIUS < b.x2 && z + RADIUS > b.z1 && z - RADIUS < b.z2);
 }
 
@@ -36,4 +37,20 @@ export function move(x: number, z: number, dx: number, dz: number) {
   const nz = hits(nx, z + dz) ? z : z + dz;
   const L = 40;
   return { x: Math.max(-L, Math.min(L, nx)), z: Math.max(-L, Math.min(L, nz)) };
+}
+
+export type Pond = { x: number; z: number; r: number };
+export const ponds: Pond[] = [
+  { x: -10, z: 2, r: 3 },
+  { x: 9, z: -2, r: 2.5 },
+  { x: 6, z: 10, r: 2 },
+];
+export const GROW_SECONDS = 40; // time for a tree to reach full size
+
+/** 0..1 growth of something born at `birth` seconds. */
+export function growth(time: number, birth: number, span = GROW_SECONDS) {
+  return Math.max(0, Math.min(1, (time - birth) / span));
+}
+export function inPond(x: number, z: number, pad = 0) {
+  return ponds.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + pad);
 }

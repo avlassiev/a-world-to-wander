@@ -2,7 +2,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, Lightformer, PointerLockControls, Sky } from "@react-three/drei";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { DOOR, EYE, HOUSE, SPEED, WINDOW, move } from "./world";
+import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, move, ponds } from "./world";
 
 function canvasTex(draw: (c: CanvasRenderingContext2D) => void, repeat: number) {
   const cv = document.createElement("canvas");
@@ -122,13 +122,100 @@ function House() {
   );
 }
 
-function Tree({ x, z, s = 1 }: { x: number; z: number; s?: number }) {
+function Tree() {
   return (
-    <group position={[x, 0, z]} scale={s}>
+    <group>
       <mesh position={[0, 0.8, 0]} castShadow><cylinderGeometry args={[0.15, 0.22, 1.6]} /><meshStandardMaterial color="#6b4526" /></mesh>
       <mesh position={[0, 2.2, 0]} castShadow><coneGeometry args={[1, 2.2, 7]} /><meshStandardMaterial color="#2f6b3a" flatShading /></mesh>
       <mesh position={[0, 3.1, 0]} castShadow><coneGeometry args={[0.7, 1.6, 7]} /><meshStandardMaterial color="#3a7d45" flatShading /></mesh>
     </group>
+  );
+}
+
+function Ponds() {
+  const water = useRef<THREE.MeshStandardMaterial>(null);
+  useFrame(({ clock }) => {
+    if (water.current) water.current.opacity = 0.8 + Math.sin(clock.elapsedTime * 1.5) * 0.05;
+  });
+  return (
+    <>
+      {ponds.map((p, i) => (
+        <group key={i} position={[p.x, 0, p.z]}>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]} receiveShadow>
+            <circleGeometry args={[p.r + 0.4, 40]} />
+            <meshStandardMaterial color="#8a7a5a" />
+          </mesh>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
+            <circleGeometry args={[p.r, 40]} />
+            <meshStandardMaterial ref={i === 0 ? water : null} color="#3f86a8" roughness={0.05} metalness={0.3} transparent opacity={0.85} />
+          </mesh>
+          {[0, 1, 2].map((j) => (
+            <mesh key={j} rotation={[-Math.PI / 2, 0, 0]} position={[Math.cos(j * 2.1 + i) * p.r * 0.5, 0.05, Math.sin(j * 2.1 + i) * p.r * 0.5]}>
+              <circleGeometry args={[0.25, 12]} />
+              <meshStandardMaterial color="#4f9a46" />
+            </mesh>
+          ))}
+          {Array.from({ length: 8 }, (_, j) => {
+            const a = j * 0.8 + i;
+            return (
+              <mesh key={j} position={[Math.cos(a) * (p.r + 0.3), 0.4, Math.sin(a) * (p.r + 0.3)]}>
+                <cylinderGeometry args={[0.03, 0.03, 0.8]} />
+                <meshStandardMaterial color="#5d7a2e" />
+              </mesh>
+            );
+          })}
+        </group>
+      ))}
+    </>
+  );
+}
+
+const FLOWER_COLORS = ["#e8546a", "#f2c84b", "#f4f1ea", "#b07ad6", "#ff8c42"];
+
+/** The world develops: trees grow from saplings, new trees and flowers keep appearing. */
+function Growth() {
+  const items = useMemo(() => {
+    const trees: { x: number; z: number; s: number; birth: number }[] = [];
+    for (let i = 0; i < 40; i++) {
+      const a = i * 2.4, rr = 14 + ((i * 7) % 20);
+      trees.push({ x: Math.cos(a) * rr, z: Math.sin(a) * rr, s: 0.8 + ((i * 13) % 6) / 10, birth: i < 20 ? -100 : (i - 20) * 6 });
+    }
+    const flowers: { x: number; z: number; c: string; birth: number }[] = [];
+    for (let i = 0; i < 160 && flowers.length < 120; i++) {
+      const a = i * 1.7, rr = 4 + ((i * 11) % 26);
+      const x = Math.cos(a) * rr, z = Math.sin(a) * rr;
+      if (inPond(x, z, 0.5) || (x > -5 && x < 5 && z > -12 && z < 4)) continue;
+      flowers.push({ x, z, c: FLOWER_COLORS[i % FLOWER_COLORS.length]!, birth: i * 1.2 });
+    }
+    return { trees, flowers };
+  }, []);
+  const treeRefs = useRef<(THREE.Group | null)[]>([]);
+  const flowerRefs = useRef<(THREE.Group | null)[]>([]);
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime;
+    items.trees.forEach((tr, i) => {
+      const g = treeRefs.current[i];
+      if (g) g.scale.setScalar(tr.s * Math.max(0.001, 0.15 + 0.85 * growth(t, tr.birth)));
+    });
+    items.flowers.forEach((f, i) => {
+      const g = flowerRefs.current[i];
+      if (g) g.scale.setScalar(Math.max(0.001, growth(t, f.birth, 5)));
+    });
+  });
+  return (
+    <>
+      {items.trees.map((tr, i) => (
+        <group key={i} position={[tr.x, 0, tr.z]} ref={(el) => { treeRefs.current[i] = el; }}>
+          <Tree />
+        </group>
+      ))}
+      {items.flowers.map((f, i) => (
+        <group key={i} position={[f.x, 0, f.z]} ref={(el) => { flowerRefs.current[i] = el; }}>
+          <mesh position={[0, 0.15, 0]}><cylinderGeometry args={[0.015, 0.015, 0.3]} /><meshStandardMaterial color="#4e7c33" /></mesh>
+          <mesh position={[0, 0.32, 0]}><sphereGeometry args={[0.07, 8, 6]} /><meshStandardMaterial color={f.c} /></mesh>
+        </group>
+      ))}
+    </>
   );
 }
 
@@ -168,10 +255,6 @@ export default function World() {
   const [ready, setReady] = useState(false);
   const [locked, setLocked] = useState(false);
   const { grass } = useTextures();
-  const trees = useMemo(() => Array.from({ length: 40 }, (_, i) => {
-    const a = i * 2.4, rr = 14 + ((i * 7) % 20);
-    return { x: Math.cos(a) * rr, z: Math.sin(a) * rr, s: 0.8 + ((i * 13) % 6) / 10 };
-  }), []);
   return (
     <div className="game-root" data-scene-ready={ready ? "" : undefined}>
       <Canvas shadows camera={{ fov: 70, near: 0.05, far: 200 }}>
@@ -193,7 +276,8 @@ export default function World() {
           <meshStandardMaterial color="#b9a586" />
         </mesh>
         <House />
-        {trees.map((t, i) => <Tree key={i} {...t} />)}
+        <Ponds />
+        <Growth />
         <Player />
         <PointerLockControls onLock={() => setLocked(true)} onUnlock={() => setLocked(false)} />
         <Ready onReady={() => setReady(true)} />
