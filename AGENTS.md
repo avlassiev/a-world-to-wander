@@ -35,3 +35,4 @@ use the editor.
 - Body stores a filled pit while buried; Space launches the player above ground before clearing it. Dev state includes player and sim advances player physics. Why: filling cannot silently teleport the player to the surface, and escape is testable.
 - Tunnel cells retain a shaft ID and floor in world.ts; scene draws their connected underground boundaries, and dev __game.tunnel(dirX,dirZ) digs from the live player. Why: passages keep solid ceilings, collision and browser checks share the same excavation data.
 - Buried trees retain their original pit position and depth; recoverTrees reveals the same tree when digging reaches its roots. Why: filling and re-digging preserve identity instead of spawning replacement trees.
+- The walkable world spans ±500m with a 1200m ground plane; Scene's Horizon component draws static far trees and hills beyond the interactive forest. Why: the player can walk far without hitting a wall or seeing empty void.

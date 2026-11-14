@@ -35,7 +35,7 @@ function hits(x: number, z: number) {
 export function move(x: number, z: number, dx: number, dz: number) {
   const nx = hits(x + dx, z) ? x : x + dx;
   const nz = hits(nx, z + dz) ? z : z + dz;
-  const L = 40;
+  const L = 500;
   return { x: Math.max(-L, Math.min(L, nx)), z: Math.max(-L, Math.min(L, nz)) };
 }
 
@@ -102,7 +102,7 @@ export const MAX_HOLES = 150;
 /** Holes go only on open ground: not inside the house, not in ponds. */
 export function canDig(x: number, z: number) {
   const inHouse = x > HOUSE.x1 - 0.3 && x < HOUSE.x2 + 0.3 && z > HOUSE.z1 - 0.3 && z < HOUSE.z2 + 0.3;
-  return !inHouse && !inPond(x, z, 0.5) && Math.abs(x) < 40 && Math.abs(z) < 40;
+  return !inHouse && !inPond(x, z, 0.5) && Math.abs(x) < 500 && Math.abs(z) < 500;
 }
 
 // ---- Deep holes & vertical movement ----

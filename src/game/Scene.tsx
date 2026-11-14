@@ -33,7 +33,7 @@ function useTextures() {
     const grass = canvasTex((c) => {
       c.fillStyle = "#5f8f3e"; c.fillRect(0, 0, 256, 256);
       for (let i = 0; i < 3000; i++) { c.fillStyle = ["#6fa04a", "#4e7c33", "#7fae55"][i % 3] ?? "#6fa04a"; c.fillRect(Math.random() * 256, Math.random() * 256, 2, 4); }
-    }, 30);
+    }, 160);
     const wood = canvasTex((c) => {
       for (let i = 0; i < 8; i++) { c.fillStyle = i % 2 ? "#a8774a" : "#9a6a40"; c.fillRect(0, i * 32, 256, 32); c.fillStyle = "#6b4526"; c.fillRect(0, i * 32, 256, 2); }
     }, 3);
@@ -382,6 +382,34 @@ function Holes({ holes, tunnels }: { holes: Hole[]; tunnels: Tunnel[] }) {
   );
 }
 
+/** Distant hills and a far forest so the horizon never looks empty. */
+function Horizon() {
+  const hills = useMemo(() => Array.from({ length: 16 }, (_, i) => {
+    const a = (i / 16) * Math.PI * 2 + (i % 3) * 0.13;
+    const rr = 300 + ((i * 37) % 120);
+    return { x: Math.cos(a) * rr, z: Math.sin(a) * rr, s: 60 + ((i * 23) % 50), h: 14 + ((i * 17) % 12) };
+  }), []);
+  const farTrees = useMemo(() => Array.from({ length: 70 }, (_, i) => {
+    const a = i * 2.399, rr = 55 + ((i * 29) % 200);
+    return { x: Math.cos(a) * rr, z: Math.sin(a) * rr, s: 0.9 + ((i * 7) % 8) / 10 };
+  }), []);
+  return (
+    <>
+      {hills.map((hl, i) => (
+        <mesh key={`h${i}`} position={[hl.x, 0, hl.z]}>
+          <coneGeometry args={[hl.s, hl.h, 7]} />
+          <meshStandardMaterial color={i % 2 ? "#4e7c33" : "#5f8f3e"} flatShading />
+        </mesh>
+      ))}
+      {farTrees.map((t, i) => (
+        <group key={`t${i}`} position={[t.x, 0, t.z]} scale={t.s}>
+          <Tree />
+        </group>
+      ))}
+    </>
+  );
+}
+
 function Ready({ onReady }: { onReady: () => void }) {
   const n = useRef(0);
   useFrame(() => { if (++n.current === 2) onReady(); });
@@ -446,9 +474,9 @@ export default function World() {
   const { grass } = useTextures();
   return (
     <div className="game-root" data-scene-ready={ready ? "" : undefined}>
-      <Canvas shadows gl={{ stencil: true }} camera={{ fov: 70, near: 0.05, far: 200 }}>
+      <Canvas shadows gl={{ stencil: true }} camera={{ fov: 70, near: 0.05, far: 600 }}>
         <Sky sunPosition={[30, 20, 10]} turbidity={4} />
-        <fog attach="fog" args={["#cfe3ec", 30, 90]} />
+        <fog attach="fog" args={["#cfe3ec", 60, 260]} />
         <hemisphereLight args={["#dff1ff", "#5a6b3a", 0.6]} />
         <directionalLight position={[30, 25, 10]} intensity={2.2} castShadow shadow-mapSize={[2048, 2048]}
           shadow-camera-left={-30} shadow-camera-right={30} shadow-camera-top={30} shadow-camera-bottom={-30} />
@@ -457,7 +485,7 @@ export default function World() {
           <Lightformer intensity={1} color="#bcd" position={[-5, 1, -1]} rotation-y={Math.PI / 2} scale={[20, 1, 1]} />
         </Environment>
         <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-          <planeGeometry args={[200, 200]} />
+          <planeGeometry args={[1200, 1200]} />
           <meshStandardMaterial map={grass} stencilWrite stencilRef={1} stencilWriteMask={0} stencilFunc={THREE.NotEqualStencilFunc} />
         </mesh>
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, -1]} receiveShadow>
@@ -466,6 +494,7 @@ export default function World() {
         </mesh>
         <House />
         <Ponds />
+        <Horizon />
         <Growth holes={holesRef} trees={treesRef} time={timeRef} advance={advanceRef} />
         <Player onDig={onDig} onFill={onFill} onTunnel={onTunnel} holes={holesRef} tunnels={tunnelsRef} pos={playerRef} advance={playerAdvanceRef} />
         <Holes holes={holes} tunnels={tunnels} />
