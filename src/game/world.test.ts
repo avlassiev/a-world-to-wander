@@ -84,9 +84,28 @@ describe("filling holes", () => {
     expect(result.trees[1]?.buried).toBeUndefined();
     expect(tr.buried).toBeUndefined();
   });
-  it("restores solid ground for a player inside the filled hole", () => {
-    const result = fillHole([pit], [], 0, 10);
-    expect(step({ x: 0, y: -6, z: 10, vy: 0 }, 0, 0, false, result.holes, 1 / 60).y).toBe(0);
+  it("filling while inside buries the player instead of lifting them out", () => {
+    const result = fillHole([pit], [], 0, 10, { x: 0, y: -6, z: 10, vy: 0 });
+    if (!result.player) throw new Error("Missing player");
+    const b = step(result.player, 1, 0, false, result.holes, 1 / 60);
+    expect(b.y).toBe(-6);
+    expect(b.x).toBe(0);
+    expect(b.buried?.d).toBe(6);
+  });
+  it("Space lets a buried player jump above the surface", () => {
+    const result = fillHole([pit], [], 0, 10, { x: 0, y: -6, z: 10, vy: 0 });
+    if (!result.player) throw new Error("Missing player");
+    let b = step(result.player, 0, 0, true, [], 1 / 60);
+    let peak = b.y;
+    for (let i = 0; i < 120; i++) { b = step(b, 0, 0, false, [], 1 / 60); peak = Math.max(peak, b.y); }
+    expect(peak).toBeGreaterThan(0);
+    expect(b.y).toBe(0);
+    expect(b.buried).toBeUndefined();
+  });
+  it("filling after jumping out does not bury the player", () => {
+    const result = fillHole([pit], [], 0, 10, { x: 0, y: 0.3, z: 10, vy: 2 });
+    expect(result.player?.buried).toBeUndefined();
+    expect(result.player?.y).toBe(0.3);
   });
   it("does nothing when there is no hole within reach", () => {
     expect(fillHole([pit], [], 20, 20).holes).toEqual([pit]);

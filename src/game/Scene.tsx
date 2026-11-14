@@ -11,7 +11,7 @@ declare global {
       fill: (x: number, z: number) => void;
       sim: (seconds: number) => void;
       view?: (x: number, z: number, targetX: number, targetZ: number) => void;
-      readonly state: { holes: Hole[]; trees: (ReturnType<typeof treePose> & { buried: boolean })[] };
+      readonly state: { player: Body; holes: Hole[]; trees: (ReturnType<typeof treePose> & { buried: boolean })[] };
     };
   }
 }
@@ -244,10 +244,11 @@ function Growth({ holes, trees, time, advance }: { holes: React.RefObject<Hole[]
   );
 }
 
-function Player({ onDig, onFill, holes }: { onDig: (x: number, z: number) => void; onFill: (x: number, z: number) => void; holes: React.RefObject<Hole[]> }) {
+function Player({ onDig, onFill, holes, pos, advance }: { onDig: (x: number, z: number) => void; onFill: (x: number, z: number) => void; holes: React.RefObject<Hole[]>; pos: React.RefObject<Body>; advance: React.RefObject<(dt: number) => void> }) {
   const { camera } = useThree();
   const keys = useRef<Record<string, boolean>>({});
-  const pos = useRef<Body>({ x: 0, y: 0, z: 6, vy: 0 });
+  const earth = useRef<THREE.Mesh>(null);
+  const { wood } = useTextures();
   useEffect(() => {
     camera.position.set(0, EYE, 6);
     camera.lookAt(0, EYE, -8);
@@ -262,7 +263,10 @@ function Player({ onDig, onFill, holes }: { onDig: (x: number, z: number) => voi
         const dir = new THREE.Vector3();
         camera.getWorldDirection(dir); dir.y = 0; dir.normalize();
         const x = pos.current.x + dir.x * DIG_REACH, z = pos.current.z + dir.z * DIG_REACH;
-        if (e.code === "KeyE") onDig(x, z);
+        if (e.code === "KeyE") {
+          const inside = pos.current.y < 0 && holes.current.some((h) => Math.hypot(h.x - pos.current.x, h.z - pos.current.z) < h.r);
+          onDig(inside ? pos.current.x : x, inside ? pos.current.z : z);
+        }
         else {
           const ahead = holes.current.some((h) => Math.hypot(h.x - x, h.z - z) <= h.r + 0.2);
           onFill(ahead ? x : pos.current.x, ahead ? z : pos.current.z);
@@ -272,10 +276,10 @@ function Player({ onDig, onFill, holes }: { onDig: (x: number, z: number) => voi
     const u = (e: KeyboardEvent) => (keys.current[e.code] = false);
     window.addEventListener("keydown", d); window.addEventListener("keyup", u);
     return () => { window.removeEventListener("keydown", d); window.removeEventListener("keyup", u); };
-  }, [camera, onDig, onFill, holes]);
+  }, [camera, onDig, onFill, holes, pos]);
   const f = new THREE.Vector3(), r = new THREE.Vector3();
-  useFrame((_, delta) => {
-    const dt = Math.min(delta, 0.05), k = keys.current;
+  const tick = (dt: number) => {
+    const k = keys.current;
     const fw = (k["KeyW"] || k["ArrowUp"] ? 1 : 0) - (k["KeyS"] || k["ArrowDown"] ? 1 : 0);
     const st = (k["KeyD"] || k["ArrowRight"] ? 1 : 0) - (k["KeyA"] || k["ArrowLeft"] ? 1 : 0);
     camera.getWorldDirection(f); f.y = 0; f.normalize();
@@ -283,8 +287,17 @@ function Player({ onDig, onFill, holes }: { onDig: (x: number, z: number) => voi
     const mx = (f.x * fw + r.x * st) * SPEED * dt, mz = (f.z * fw + r.z * st) * SPEED * dt;
     pos.current = step(pos.current, mx, mz, !!k["Space"], holes.current, dt);
     camera.position.set(pos.current.x, pos.current.y + EYE, pos.current.z);
-  });
-  return null;
+    if (earth.current) {
+      earth.current.visible = !!pos.current.buried;
+      earth.current.position.copy(camera.position);
+    }
+  };
+  advance.current = tick;
+  useFrame((_, delta) => tick(Math.min(delta, 0.05)));
+  return <mesh ref={earth} visible={false} renderOrder={1000}>
+    <sphereGeometry args={[0.3, 16, 12]} />
+    <meshBasicMaterial map={wood} color="#5a3b22" side={THREE.BackSide} depthTest={false} depthWrite={false} />
+  </mesh>;
 }
 
 type Hole = { x: number; z: number; r: number; d: number; id: number };
@@ -337,6 +350,8 @@ export default function World() {
   const treesRef = useRef(createTrees());
   const timeRef = useRef(0);
   const advanceRef = useRef<(seconds: number) => void>(() => {});
+  const playerRef = useRef<Body>({ x: 0, y: 0, z: 6, vy: 0 });
+  const playerAdvanceRef = useRef<(dt: number) => void>(() => {});
   holesRef.current = holes;
   const onDig = useCallback((x: number, z: number) => {
     if (!canDig(x, z)) return;
@@ -352,7 +367,8 @@ export default function World() {
     });
   }, []);
   const onFill = useCallback((x: number, z: number) => {
-    const result = fillHole(holesRef.current, treesRef.current, x, z);
+    const result = fillHole(holesRef.current, treesRef.current, x, z, playerRef.current);
+    if (result.player) playerRef.current = result.player;
     holesRef.current = result.holes;
     treesRef.current = result.trees;
     setHoles(result.holes);
@@ -364,9 +380,12 @@ export default function World() {
     window.__game = {
       dig: onDig,
       fill: onFill,
-      sim: (seconds) => advanceRef.current(seconds),
+      sim: (seconds) => {
+        advanceRef.current(seconds);
+        for (let remaining = seconds; remaining > 0; remaining -= 1 / 60) playerAdvanceRef.current(Math.min(remaining, 1 / 60));
+      },
       ...(previousView ? { view: previousView } : {}),
-      get state() { return { holes: holesRef.current, trees: treesRef.current.map((tr) => ({ ...treePose(tr, timeRef.current), buried: !!tr.buried })) }; },
+      get state() { return { player: { ...playerRef.current }, holes: holesRef.current, trees: treesRef.current.map((tr) => ({ ...treePose(tr, timeRef.current), buried: !!tr.buried })) }; },
     };
     return () => { delete window.__game; };
   }, [onDig, onFill]);
@@ -394,7 +413,7 @@ export default function World() {
         <House />
         <Ponds />
         <Growth holes={holesRef} trees={treesRef} time={timeRef} advance={advanceRef} />
-        <Player onDig={onDig} onFill={onFill} holes={holesRef} />
+        <Player onDig={onDig} onFill={onFill} holes={holesRef} pos={playerRef} advance={playerAdvanceRef} />
         <Holes holes={holes} />
         <PointerLockControls onLock={() => setLocked(true)} onUnlock={() => setLocked(false)} />
         <Ready onReady={() => setReady(true)} />

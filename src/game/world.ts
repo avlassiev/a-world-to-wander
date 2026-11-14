@@ -108,14 +108,16 @@ export function canDig(x: number, z: number) {
 // ---- Deep holes & vertical movement ----
 export type HoleShape = { x: number; z: number; r: number; d: number };
 /** Fill the targeted pit completely, burying any tree that fell into it. */
-export function fillHole<H extends HoleShape & { id: number }>(holes: H[], trees: FallingTree[], x: number, z: number) {
+export function fillHole<H extends HoleShape & { id: number }>(holes: H[], trees: FallingTree[], x: number, z: number, player?: Body) {
   const target = holes
     .filter((h) => Math.hypot(h.x - x, h.z - z) <= h.r + 0.2)
     .sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z))[0];
-  if (!target) return { holes, trees };
+  if (!target) return { holes, trees, player };
   return {
     holes: holes.filter((h) => h.id !== target.id),
     trees: trees.map((tr) => tr.fall?.hole.id === target.id ? { ...tr, buried: true } : tr),
+    player: player && player.y < 0 && holeAt([target], player.x, player.z)
+      ? { ...player, buried: { ...target } } : player,
   };
 }
 export const HOLE_START_R = 0.6;
@@ -126,7 +128,7 @@ export const GRAVITY = 20;
 export const JUMP = 5.5; // normal hop
 /** Jump from a hole bottom: just enough to clear the rim at any depth. */
 export const climbFor = (d: number) => Math.sqrt(2 * GRAVITY * (d + 0.6));
-export type Body = { x: number; y: number; z: number; vy: number };
+export type Body = { x: number; y: number; z: number; vy: number; buried?: HoleShape };
 
 export function holeAt(holes: HoleShape[], x: number, z: number) {
   return holes.find((h) => h.r > RADIUS && Math.hypot(x - h.x, z - h.z) < h.r - RADIUS * 0.5);
@@ -135,6 +137,15 @@ export function holeAt(holes: HoleShape[], x: number, z: number) {
 /** One physics step: horizontal move (walls of a hole block you while below ground), gravity, jump. */
 export function step(b: Body, dx: number, dz: number, jump: boolean, holes: HoleShape[], dt: number): Body {
   let { x, y, z, vy } = b;
+  if (b.buried) {
+    const bottom = -b.buried.d;
+    if (jump && y <= bottom + 0.001 && vy <= 0) vy = climbFor(b.buried.d);
+    vy -= GRAVITY * dt;
+    y = Math.max(bottom, y + vy * dt);
+    if (y <= bottom) vy = 0;
+    if (y >= 0) return { x, y, z, vy };
+    return { x, y, z, vy, buried: b.buried };
+  }
   if (y < -0.05) {
     const h = holes.find((h) => Math.hypot(x - h.x, z - h.z) < h.r + 0.01);
     const fits = (px: number, pz: number) => !h || Math.hypot(px - h.x, pz - h.z) <= h.r - RADIUS * 0.5;

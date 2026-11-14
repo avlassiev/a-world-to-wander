@@ -32,3 +32,4 @@ use the editor.
 - 3D world: rules/collision in src/game/world.ts (no React/three), scene in src/game/Scene.tsx; / route is ssr:false. Why: keeps physics testable and Canvas off the server.
 - Tree placement and falling rules live in world.ts; Growth draws ref-held poses without React frame updates. Why: deterministic tests cover digging reactions.
 - Dev-only window.__game exposes state, dig(x,z), fill(x,z), sim(seconds), view(x,z,targetX,targetZ); data-scene-ready signals rendering. Why: browser checks can reach and inspect digging, filling and falling trees despite slow software rendering.
+- Body stores a filled pit while buried; Space launches the player above ground before clearing it. Dev state includes player and sim advances player physics. Why: filling cannot silently teleport the player to the surface, and escape is testable.
