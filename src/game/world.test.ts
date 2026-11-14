@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HOLE_START_D, HOLE_MAX_D, step, attractTrees, treePose, TREE_FALL_SECONDS, type FallingTree, type Body } from "./world";
+import { HOLE_START_D, HOLE_MAX_D, step, attractTrees, treePose, fillHole, TREE_FALL_SECONDS, type FallingTree, type Body } from "./world";
 
 const hole = [{ x: 0, z: 10, r: 1, d: HOLE_START_D }];
 const run = (b: Body, n: number, jump = false, dx = 0, dz = 0) => {
@@ -65,5 +65,30 @@ describe("trees falling into dug holes", () => {
     attractTrees(trees, { ...pit, d: 6 }, 3, false);
     expect(treePose(trees[0] ?? makeTree(0), 4).y).toBe(-6);
     expect(trees[1]?.fall).toBeUndefined();
+  });
+});
+
+describe("filling holes", () => {
+  const pit = { x: 0, z: 10, r: 0.6, d: 6, id: 1 };
+  it("fills the targeted hole completely without removing other holes", () => {
+    const other = { ...pit, x: 10, id: 2 };
+    expect(fillHole([pit, other], [], 0, 10).holes).toEqual([other]);
+  });
+  it("buries a fallen tree and leaves other trees alone", () => {
+    const tr: FallingTree = { x: 0, z: 10, s: 1, birth: -100 };
+    const other: FallingTree = { x: 20, z: 10, s: 1, birth: -100 };
+    attractTrees([tr, other], pit, 0, true);
+    const result = fillHole([pit], [tr, other], 0, 10);
+    expect(result.holes).toHaveLength(0);
+    expect(result.trees[0]?.buried).toBe(true);
+    expect(result.trees[1]?.buried).toBeUndefined();
+    expect(tr.buried).toBeUndefined();
+  });
+  it("restores solid ground for a player inside the filled hole", () => {
+    const result = fillHole([pit], [], 0, 10);
+    expect(step({ x: 0, y: -6, z: 10, vy: 0 }, 0, 0, false, result.holes, 1 / 60).y).toBe(0);
+  });
+  it("does nothing when there is no hole within reach", () => {
+    expect(fillHole([pit], [], 20, 20).holes).toEqual([pit]);
   });
 });

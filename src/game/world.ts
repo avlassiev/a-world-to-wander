@@ -54,6 +54,7 @@ export function growth(time: number, birth: number, span = GROW_SECONDS) {
 
 export type FallingTree = {
   x: number; z: number; s: number; birth: number;
+  buried?: boolean;
   fall?: { hole: HoleShape & { id: number }; started: number };
 };
 export const TREE_FALL_SECONDS = 2;
@@ -66,7 +67,7 @@ export function createTrees(): FallingTree[] {
 
 /** New holes pull nearby trees in, or the nearest tree when dug away from the forest. */
 export function attractTrees(trees: FallingTree[], hole: HoleShape & { id: number }, time: number, isNew: boolean) {
-  const standing = trees.filter((tr) => !tr.fall && tr.birth <= time);
+  const standing = trees.filter((tr) => !tr.buried && !tr.fall && tr.birth <= time);
   const distance = (tr: FallingTree) => Math.hypot(tr.x - hole.x, tr.z - hole.z);
   const nearby = standing.filter((tr) => distance(tr) <= hole.r + (isNew ? 3 : 0.2));
   if (isNew && nearby.length === 0) {
@@ -106,6 +107,17 @@ export function canDig(x: number, z: number) {
 
 // ---- Deep holes & vertical movement ----
 export type HoleShape = { x: number; z: number; r: number; d: number };
+/** Fill the targeted pit completely, burying any tree that fell into it. */
+export function fillHole<H extends HoleShape & { id: number }>(holes: H[], trees: FallingTree[], x: number, z: number) {
+  const target = holes
+    .filter((h) => Math.hypot(h.x - x, h.z - z) <= h.r + 0.2)
+    .sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z))[0];
+  if (!target) return { holes, trees };
+  return {
+    holes: holes.filter((h) => h.id !== target.id),
+    trees: trees.map((tr) => tr.fall?.hole.id === target.id ? { ...tr, buried: true } : tr),
+  };
+}
 export const HOLE_START_R = 0.6;
 export const HOLE_START_D = 1.2;
 export const HOLE_MAX_R = 2.4;

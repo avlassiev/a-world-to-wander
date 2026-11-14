@@ -2,15 +2,16 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, Lightformer, PointerLockControls, Sky } from "@react-three/drei";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, canDig, DIG_REACH, MAX_HOLES, step, HOLE_START_R, HOLE_START_D, HOLE_MAX_R, HOLE_MAX_D, createTrees, attractTrees, treePose, type FallingTree, type Body } from "./world";
+import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, canDig, DIG_REACH, MAX_HOLES, step, HOLE_START_R, HOLE_START_D, HOLE_MAX_R, HOLE_MAX_D, createTrees, attractTrees, treePose, fillHole, type FallingTree, type Body } from "./world";
 
 declare global {
   interface Window {
     __game?: {
       dig: (x: number, z: number) => void;
+      fill: (x: number, z: number) => void;
       sim: (seconds: number) => void;
       view?: (x: number, z: number, targetX: number, targetZ: number) => void;
-      readonly state: { holes: Hole[]; trees: ReturnType<typeof treePose>[] };
+      readonly state: { holes: Hole[]; trees: (ReturnType<typeof treePose> & { buried: boolean })[] };
     };
   }
 }
@@ -212,6 +213,7 @@ function Growth({ holes, trees, time, advance }: { holes: React.RefObject<Hole[]
     trees.current.forEach((tr, i) => {
       const g = treeRefs.current[i];
       if (g) {
+        g.visible = !tr.buried;
         const pose = treePose(tr, t);
         g.position.set(pose.x, pose.y, pose.z);
         g.rotation.set(pose.tilt * Math.cos(pose.heading), 0, -pose.tilt * Math.sin(pose.heading));
@@ -242,7 +244,7 @@ function Growth({ holes, trees, time, advance }: { holes: React.RefObject<Hole[]
   );
 }
 
-function Player({ onDig, holes }: { onDig: (x: number, z: number) => void; holes: React.RefObject<Hole[]> }) {
+function Player({ onDig, onFill, holes }: { onDig: (x: number, z: number) => void; onFill: (x: number, z: number) => void; holes: React.RefObject<Hole[]> }) {
   const { camera } = useThree();
   const keys = useRef<Record<string, boolean>>({});
   const pos = useRef<Body>({ x: 0, y: 0, z: 6, vy: 0 });
@@ -256,16 +258,21 @@ function Player({ onDig, holes }: { onDig: (x: number, z: number) => void; holes
     };
     const d = (e: KeyboardEvent) => {
       keys.current[e.code] = true;
-      if (e.code === "KeyE" && !e.repeat) {
+      if ((e.code === "KeyE" || e.code === "KeyF") && !e.repeat) {
         const dir = new THREE.Vector3();
         camera.getWorldDirection(dir); dir.y = 0; dir.normalize();
-        onDig(pos.current.x + dir.x * DIG_REACH, pos.current.z + dir.z * DIG_REACH);
+        const x = pos.current.x + dir.x * DIG_REACH, z = pos.current.z + dir.z * DIG_REACH;
+        if (e.code === "KeyE") onDig(x, z);
+        else {
+          const ahead = holes.current.some((h) => Math.hypot(h.x - x, h.z - z) <= h.r + 0.2);
+          onFill(ahead ? x : pos.current.x, ahead ? z : pos.current.z);
+        }
       }
     };
     const u = (e: KeyboardEvent) => (keys.current[e.code] = false);
     window.addEventListener("keydown", d); window.addEventListener("keyup", u);
     return () => { window.removeEventListener("keydown", d); window.removeEventListener("keyup", u); };
-  }, [camera, onDig]);
+  }, [camera, onDig, onFill, holes]);
   const f = new THREE.Vector3(), r = new THREE.Vector3();
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05), k = keys.current;
@@ -344,17 +351,25 @@ export default function World() {
       return [...hs, { x, z, r: HOLE_START_R, d: HOLE_START_D, id: Date.now() + Math.random() }].slice(-MAX_HOLES);
     });
   }, []);
+  const onFill = useCallback((x: number, z: number) => {
+    const result = fillHole(holesRef.current, treesRef.current, x, z);
+    holesRef.current = result.holes;
+    treesRef.current = result.trees;
+    setHoles(result.holes);
+    advanceRef.current(0);
+  }, []);
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const previousView = window.__game?.view;
     window.__game = {
       dig: onDig,
+      fill: onFill,
       sim: (seconds) => advanceRef.current(seconds),
       ...(previousView ? { view: previousView } : {}),
-      get state() { return { holes: holesRef.current, trees: treesRef.current.map((tr) => treePose(tr, timeRef.current)) }; },
+      get state() { return { holes: holesRef.current, trees: treesRef.current.map((tr) => ({ ...treePose(tr, timeRef.current), buried: !!tr.buried })) }; },
     };
     return () => { delete window.__game; };
-  }, [onDig]);
+  }, [onDig, onFill]);
   const { grass } = useTextures();
   return (
     <div className="game-root" data-scene-ready={ready ? "" : undefined}>
@@ -379,7 +394,7 @@ export default function World() {
         <House />
         <Ponds />
         <Growth holes={holesRef} trees={treesRef} time={timeRef} advance={advanceRef} />
-        <Player onDig={onDig} holes={holesRef} />
+        <Player onDig={onDig} onFill={onFill} holes={holesRef} />
         <Holes holes={holes} />
         <PointerLockControls onLock={() => setLocked(true)} onUnlock={() => setLocked(false)} />
         <Ready onReady={() => setReady(true)} />
@@ -388,7 +403,7 @@ export default function World() {
         <div className="game-overlay">
           <h1>Домик в лесу</h1>
           <p>Нажмите, чтобы войти в мир</p>
-          <p className="hint">W A S D — ходить · мышь — смотреть · E — копать · пробел — прыжок · Esc — пауза</p>
+          <p className="hint">W A S D — ходить · мышь — смотреть · E — копать · F — закапывать · пробел — прыжок · Esc — пауза</p>
         </div>
       )}
       {locked && <div className="game-crosshair" />}
