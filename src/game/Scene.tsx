@@ -18,7 +18,7 @@ function useTextures() {
   return useMemo(() => {
     const grass = canvasTex((c) => {
       c.fillStyle = "#5f8f3e"; c.fillRect(0, 0, 256, 256);
-      for (let i = 0; i < 3000; i++) { c.fillStyle = ["#6fa04a", "#4e7c33", "#7fae55"][i % 3]; c.fillRect(Math.random() * 256, Math.random() * 256, 2, 4); }
+      for (let i = 0; i < 3000; i++) { c.fillStyle = ["#6fa04a", "#4e7c33", "#7fae55"][i % 3]!; c.fillRect(Math.random() * 256, Math.random() * 256, 2, 4); }
     }, 30);
     const wood = canvasTex((c) => {
       for (let i = 0; i < 8; i++) { c.fillStyle = i % 2 ? "#a8774a" : "#9a6a40"; c.fillRect(0, i * 32, 256, 32); c.fillStyle = "#6b4526"; c.fillRect(0, i * 32, 256, 2); }
@@ -39,7 +39,7 @@ function B({ p, s, c, map, ...rest }: { p: V3; s: V3; c?: string; map?: THREE.Te
   return (
     <mesh position={p} castShadow receiveShadow>
       <boxGeometry args={s} />
-      <meshStandardMaterial color={c ?? "#fff"} map={map} {...rest} />
+      <meshStandardMaterial color={c ?? "#fff"} map={map ?? null} {...rest} />
     </mesh>
   );
 }
@@ -89,8 +89,8 @@ function House() {
       <B p={[-2.7, 0.012, -6.9]} s={[2.4, 0.01, 1.8]} c="#c46a4a" />
       {/* dining table + chairs */}
       <B p={[-2.4, 0.75, -8.5]} s={[1.6, 0.06, 0.8]} c="#8a5730" />
-      {[[-3.1, -8.8], [-1.7, -8.8], [-3.1, -8.2], [-1.7, -8.2]].map(([x, z], i) => <B key={i} p={[x, 0.37, z]} s={[0.06, 0.74, 0.06]} c="#6b4526" />)}
-      {[[-2.8, -9.2], [-2.0, -9.2], [-2.8, -7.8], [-2.0, -7.8]].map(([x, z], i) => (
+      {([[-3.1, -8.8], [-1.7, -8.8], [-3.1, -8.2], [-1.7, -8.2]] as [number, number][]).map(([x, z], i) => <B key={i} p={[x, 0.37, z]} s={[0.06, 0.74, 0.06]} c="#6b4526" />)}
+      {([[-2.8, -9.2], [-2.0, -9.2], [-2.8, -7.8], [-2.0, -7.8]] as [number, number][]).map(([x, z], i) => (
         <group key={i}>
           <B p={[x, 0.45, z]} s={[0.45, 0.05, 0.45]} c="#b5804f" />
           <B p={[x, 0.22, z]} s={[0.35, 0.44, 0.35]} c="#9a6a40" />
@@ -110,7 +110,7 @@ function House() {
       <B p={[1.4, 1.1, -10.75]} s={[0.04, 0.3, 0.04]} c="#b8c2c8" />
       {/* stove */}
       <B p={[2.6, 0.95, -10.5]} s={[0.7, 0.02, 0.5]} c="#222" />
-      {[[2.45, -10.4], [2.75, -10.4], [2.45, -10.62], [2.75, -10.62]].map(([x, z], i) => (
+      {([[2.45, -10.4], [2.75, -10.4], [2.45, -10.62], [2.75, -10.62]] as [number, number][]).map(([x, z], i) => (
         <mesh key={i} position={[x, 0.97, z]} rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.05, 0.08, 20]} /><meshStandardMaterial color="#c33" emissive="#a22" /></mesh>
       ))}
       <B p={[2.2, 2.1, -10.62]} s={[3.2, 0.7, 0.35]} c="#d9cfbd" />
@@ -147,8 +147,8 @@ function Player() {
   const f = new THREE.Vector3(), r = new THREE.Vector3();
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05), k = keys.current;
-    const fw = (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0);
-    const st = (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0);
+    const fw = (k["KeyW"] || k["ArrowUp"] ? 1 : 0) - (k["KeyS"] || k["ArrowDown"] ? 1 : 0);
+    const st = (k["KeyD"] || k["ArrowRight"] ? 1 : 0) - (k["KeyA"] || k["ArrowLeft"] ? 1 : 0);
     camera.getWorldDirection(f); f.y = 0; f.normalize();
     r.crossVectors(f, camera.up).normalize();
     const mx = (f.x * fw + r.x * st) * SPEED * dt, mz = (f.z * fw + r.z * st) * SPEED * dt;
