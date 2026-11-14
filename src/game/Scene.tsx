@@ -2,7 +2,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, Lightformer, PointerLockControls, Sky } from "@react-three/drei";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, canDig, DIG_REACH, MAX_HOLES, step, HOLE_DEPTH, HOLE_START_R, HOLE_MAX_R, type Body } from "./world";
+import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, canDig, DIG_REACH, MAX_HOLES, step, HOLE_START_R, HOLE_START_D, HOLE_MAX_R, HOLE_MAX_D, type Body } from "./world";
 
 function canvasTex(draw: (c: CanvasRenderingContext2D) => void, repeat: number) {
   const cv = document.createElement("canvas");
@@ -252,7 +252,7 @@ function Player({ onDig, holes }: { onDig: (x: number, z: number) => void; holes
   return null;
 }
 
-type Hole = { x: number; z: number; r: number; id: number };
+type Hole = { x: number; z: number; r: number; d: number; id: number };
 const holeMask = new THREE.MeshBasicMaterial({
   colorWrite: false, depthWrite: false, stencilWrite: true, stencilRef: 1,
   stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp,
@@ -266,11 +266,11 @@ function Holes({ holes }: { holes: Hole[] }) {
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]} material={holeMask} renderOrder={-1}>
             <circleGeometry args={[h.r, 32]} />
           </mesh>
-          <mesh position={[0, -HOLE_DEPTH / 2, 0]}>
-            <cylinderGeometry args={[h.r, h.r * 0.9, HOLE_DEPTH, 32, 1, true]} />
+          <mesh position={[0, -h.d / 2, 0]}>
+            <cylinderGeometry args={[h.r, h.r * 0.9, h.d, 32, 1, true]} />
             <meshStandardMaterial color="#5a3b22" side={THREE.BackSide} />
           </mesh>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -HOLE_DEPTH + 0.01, 0]}>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -h.d + 0.01, 0]}>
             <circleGeometry args={[h.r * 0.9, 32]} />
             <meshStandardMaterial color="#3a2614" />
           </mesh>
@@ -304,8 +304,13 @@ export default function World() {
     if (!canDig(x, z)) return;
     setHoles((hs) => {
       const near = hs.find((h) => Math.hypot(h.x - x, h.z - z) < h.r + 0.2);
-      if (near) return hs.map((h) => (h === near ? { ...h, r: Math.min(h.r + 0.2, HOLE_MAX_R) } : h));
-      return [...hs, { x, z, r: HOLE_START_R, id: Date.now() + Math.random() }].slice(-MAX_HOLES);
+      if (near)
+        return hs.map((h) =>
+          h === near
+            ? { ...h, r: Math.min(h.r + 0.15, HOLE_MAX_R), d: Math.min(h.d + 0.5, HOLE_MAX_D) }
+            : h,
+        );
+      return [...hs, { x, z, r: HOLE_START_R, d: HOLE_START_D, id: Date.now() + Math.random() }].slice(-MAX_HOLES);
     });
   }, []);
   const { grass } = useTextures();

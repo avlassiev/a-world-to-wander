@@ -64,13 +64,15 @@ export function canDig(x: number, z: number) {
 }
 
 // ---- Deep holes & vertical movement ----
-export type HoleShape = { x: number; z: number; r: number };
-export const HOLE_DEPTH = 2.2;
+export type HoleShape = { x: number; z: number; r: number; d: number };
 export const HOLE_START_R = 0.6;
-export const HOLE_MAX_R = 1.4;
+export const HOLE_START_D = 1.2;
+export const HOLE_MAX_R = 2.4;
+export const HOLE_MAX_D = 6; // deepest a hole can get
 export const GRAVITY = 20;
 export const JUMP = 5.5; // normal hop
-export const CLIMB = 10; // jump from a hole bottom: enough to reach the rim
+/** Jump from a hole bottom: just enough to clear the rim at any depth. */
+export const climbFor = (d: number) => Math.sqrt(2 * GRAVITY * (d + 0.6));
 export type Body = { x: number; y: number; z: number; vy: number };
 
 export function holeAt(holes: HoleShape[], x: number, z: number) {
@@ -88,9 +90,10 @@ export function step(b: Body, dx: number, dz: number, jump: boolean, holes: Hole
   } else {
     ({ x, z } = move(x, z, dx, dz));
   }
-  const ground = holeAt(holes, x, z) ? -HOLE_DEPTH : 0;
+  const inHole = holeAt(holes, x, z);
+  const ground = inHole ? -inHole.d : 0;
   const onGround = y <= ground + 0.001 && vy <= 0;
-  if (onGround && jump) vy = ground < 0 ? CLIMB : JUMP;
+  if (onGround && jump) vy = inHole ? climbFor(inHole.d) : JUMP;
   vy -= GRAVITY * dt;
   y += vy * dt;
   if (y <= ground) { y = ground; vy = 0; }
