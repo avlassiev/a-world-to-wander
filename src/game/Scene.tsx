@@ -2,12 +2,24 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, Lightformer, PointerLockControls, Sky } from "@react-three/drei";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, canDig, DIG_REACH, MAX_HOLES, step, HOLE_START_R, HOLE_START_D, HOLE_MAX_R, HOLE_MAX_D, type Body } from "./world";
+import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, canDig, DIG_REACH, MAX_HOLES, step, HOLE_START_R, HOLE_START_D, HOLE_MAX_R, HOLE_MAX_D, createTrees, attractTrees, treePose, type FallingTree, type Body } from "./world";
+
+declare global {
+  interface Window {
+    __game?: {
+      dig: (x: number, z: number) => void;
+      sim: (seconds: number) => void;
+      view?: (x: number, z: number, targetX: number, targetZ: number) => void;
+      readonly state: { holes: Hole[]; trees: ReturnType<typeof treePose>[] };
+    };
+  }
+}
 
 function canvasTex(draw: (c: CanvasRenderingContext2D) => void, repeat: number) {
   const cv = document.createElement("canvas");
   cv.width = cv.height = 256;
-  draw(cv.getContext("2d")!);
+  const context = cv.getContext("2d");
+  if (context) draw(context);
   const tx = new THREE.CanvasTexture(cv);
   tx.wrapS = tx.wrapT = THREE.RepeatWrapping;
   tx.repeat.set(repeat, repeat);
@@ -18,7 +30,7 @@ function useTextures() {
   return useMemo(() => {
     const grass = canvasTex((c) => {
       c.fillStyle = "#5f8f3e"; c.fillRect(0, 0, 256, 256);
-      for (let i = 0; i < 3000; i++) { c.fillStyle = ["#6fa04a", "#4e7c33", "#7fae55"][i % 3]!; c.fillRect(Math.random() * 256, Math.random() * 256, 2, 4); }
+      for (let i = 0; i < 3000; i++) { c.fillStyle = ["#6fa04a", "#4e7c33", "#7fae55"][i % 3] ?? "#6fa04a"; c.fillRect(Math.random() * 256, Math.random() * 256, 2, 4); }
     }, 30);
     const wood = canvasTex((c) => {
       for (let i = 0; i < 8; i++) { c.fillStyle = i % 2 ? "#a8774a" : "#9a6a40"; c.fillRect(0, i * 32, 256, 32); c.fillStyle = "#6b4526"; c.fillRect(0, i * 32, 256, 2); }
@@ -173,38 +185,49 @@ function Ponds() {
 const FLOWER_COLORS = ["#e8546a", "#f2c84b", "#f4f1ea", "#b07ad6", "#ff8c42"];
 
 /** The world develops: trees grow from saplings, new trees and flowers keep appearing. */
-function Growth() {
+function Growth({ holes, trees, time, advance }: { holes: React.RefObject<Hole[]>; trees: React.RefObject<FallingTree[]>; time: React.RefObject<number>; advance: React.RefObject<(seconds: number) => void> }) {
   const items = useMemo(() => {
-    const trees: { x: number; z: number; s: number; birth: number }[] = [];
-    for (let i = 0; i < 40; i++) {
-      const a = i * 2.4, rr = 14 + ((i * 7) % 20);
-      trees.push({ x: Math.cos(a) * rr, z: Math.sin(a) * rr, s: 0.8 + ((i * 13) % 6) / 10, birth: i < 20 ? -100 : (i - 20) * 6 });
-    }
     const flowers: { x: number; z: number; c: string; birth: number }[] = [];
     for (let i = 0; i < 160 && flowers.length < 120; i++) {
       const a = i * 1.7, rr = 4 + ((i * 11) % 26);
       const x = Math.cos(a) * rr, z = Math.sin(a) * rr;
       if (inPond(x, z, 0.5) || (x > -5 && x < 5 && z > -12 && z < 4)) continue;
-      flowers.push({ x, z, c: FLOWER_COLORS[i % FLOWER_COLORS.length]!, birth: i * 1.2 });
+      flowers.push({ x, z, c: FLOWER_COLORS[i % FLOWER_COLORS.length] ?? "#e8546a", birth: i * 1.2 });
     }
-    return { trees, flowers };
+    return { flowers };
   }, []);
   const treeRefs = useRef<(THREE.Group | null)[]>([]);
   const flowerRefs = useRef<(THREE.Group | null)[]>([]);
-  useFrame(({ clock }) => {
-    const t = clock.elapsedTime;
-    items.trees.forEach((tr, i) => {
+  const seen = useRef(new Map<number, string>());
+  const tick = useCallback((seconds: number) => {
+    for (const h of holes.current) {
+      const signature = `${h.r}:${h.d}`;
+      if (seen.current.get(h.id) !== signature) {
+        attractTrees(trees.current, h, time.current, !seen.current.has(h.id));
+        seen.current.set(h.id, signature);
+      }
+    }
+    time.current += seconds;
+    const t = time.current;
+    trees.current.forEach((tr, i) => {
       const g = treeRefs.current[i];
-      if (g) g.scale.setScalar(tr.s * Math.max(0.001, 0.15 + 0.85 * growth(t, tr.birth)));
+      if (g) {
+        const pose = treePose(tr, t);
+        g.position.set(pose.x, pose.y, pose.z);
+        g.rotation.set(pose.tilt * Math.cos(pose.heading), 0, -pose.tilt * Math.sin(pose.heading));
+        g.scale.setScalar(tr.s * Math.max(0.001, 0.15 + 0.85 * growth(t, tr.birth)));
+      }
     });
     items.flowers.forEach((f, i) => {
       const g = flowerRefs.current[i];
       if (g) g.scale.setScalar(Math.max(0.001, growth(t, f.birth, 5)));
     });
-  });
+  }, [holes, trees, time, items]);
+  useEffect(() => { advance.current = tick; }, [advance, tick]);
+  useFrame((_, delta) => tick(Math.min(delta, 0.05)));
   return (
     <>
-      {items.trees.map((tr, i) => (
+      {trees.current.map((tr, i) => (
         <group key={i} position={[tr.x, 0, tr.z]} ref={(el) => { treeRefs.current[i] = el; }}>
           <Tree />
         </group>
@@ -226,6 +249,11 @@ function Player({ onDig, holes }: { onDig: (x: number, z: number) => void; holes
   useEffect(() => {
     camera.position.set(0, EYE, 6);
     camera.lookAt(0, EYE, -8);
+    if (import.meta.env.DEV && window.__game) window.__game.view = (x, z, targetX, targetZ) => {
+      pos.current = { x, y: 0, z, vy: 0 };
+      camera.position.set(x, EYE, z);
+      camera.lookAt(targetX, 0, targetZ);
+    };
     const d = (e: KeyboardEvent) => {
       keys.current[e.code] = true;
       if (e.code === "KeyE" && !e.repeat) {
@@ -299,6 +327,9 @@ export default function World() {
   const [locked, setLocked] = useState(false);
   const [holes, setHoles] = useState<Hole[]>([]);
   const holesRef = useRef<Hole[]>([]);
+  const treesRef = useRef(createTrees());
+  const timeRef = useRef(0);
+  const advanceRef = useRef<(seconds: number) => void>(() => {});
   holesRef.current = holes;
   const onDig = useCallback((x: number, z: number) => {
     if (!canDig(x, z)) return;
@@ -313,6 +344,17 @@ export default function World() {
       return [...hs, { x, z, r: HOLE_START_R, d: HOLE_START_D, id: Date.now() + Math.random() }].slice(-MAX_HOLES);
     });
   }, []);
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const previousView = window.__game?.view;
+    window.__game = {
+      dig: onDig,
+      sim: (seconds) => advanceRef.current(seconds),
+      ...(previousView ? { view: previousView } : {}),
+      get state() { return { holes: holesRef.current, trees: treesRef.current.map((tr) => treePose(tr, timeRef.current)) }; },
+    };
+    return () => { delete window.__game; };
+  }, [onDig]);
   const { grass } = useTextures();
   return (
     <div className="game-root" data-scene-ready={ready ? "" : undefined}>
@@ -336,7 +378,7 @@ export default function World() {
         </mesh>
         <House />
         <Ponds />
-        <Growth />
+        <Growth holes={holesRef} trees={treesRef} time={timeRef} advance={advanceRef} />
         <Player onDig={onDig} holes={holesRef} />
         <Holes holes={holes} />
         <PointerLockControls onLock={() => setLocked(true)} onUnlock={() => setLocked(false)} />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HOLE_START_D, HOLE_MAX_D, step, type Body } from "./world";
+import { HOLE_START_D, HOLE_MAX_D, step, attractTrees, treePose, TREE_FALL_SECONDS, type FallingTree, type Body } from "./world";
 
 const hole = [{ x: 0, z: 10, r: 1, d: HOLE_START_D }];
 const run = (b: Body, n: number, jump = false, dx = 0, dz = 0) => {
@@ -33,5 +33,37 @@ describe("deep holes", () => {
   });
   it("away from holes you stand on the ground", () => {
     expect(run({ x: 20, y: 1, z: 20, vy: 0 }, 120).y).toBe(0);
+  });
+});
+
+describe("trees falling into dug holes", () => {
+  const makeTree = (x: number, z = 10): FallingTree => ({ x, z, s: 1, birth: -100 });
+  const pit = { x: 0, z: 10, r: 0.6, d: 1.2, id: 1 };
+  it("a tree above the hole falls to the bottom", () => {
+    const tr = makeTree(0);
+    attractTrees([tr], pit, 0, true);
+    expect(treePose(tr, TREE_FALL_SECONDS)).toMatchObject({ x: 0, y: -1.2, z: 10 });
+  });
+  it("a nearby tree falls in even when its roots are outside the hole", () => {
+    const tr = makeTree(2);
+    attractTrees([tr], pit, 0, true);
+    const halfway = treePose(tr, TREE_FALL_SECONDS / 2);
+    expect(halfway.x).toBeLessThan(2);
+    expect(halfway.y).toBeLessThan(0);
+    expect(halfway.tilt).toBeGreaterThan(0);
+    expect(treePose(tr, TREE_FALL_SECONDS)).toMatchObject({ x: 0, y: -1.2, z: 10 });
+  });
+  it("digging away from trees attracts the nearest tree, not the whole forest", () => {
+    const trees = [makeTree(10), makeTree(20)];
+    attractTrees(trees, pit, 0, true);
+    expect(trees[0]?.fall?.hole.id).toBe(1);
+    expect(trees[1]?.fall).toBeUndefined();
+  });
+  it("deepening the hole lowers the tree instead of making another distant tree fall", () => {
+    const trees = [makeTree(0), makeTree(20)];
+    attractTrees(trees, pit, 0, true);
+    attractTrees(trees, { ...pit, d: 6 }, 3, false);
+    expect(treePose(trees[0] ?? makeTree(0), 4).y).toBe(-6);
+    expect(trees[1]?.fall).toBeUndefined();
   });
 });

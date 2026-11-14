@@ -51,6 +51,47 @@ export const GROW_SECONDS = 40; // time for a tree to reach full size
 export function growth(time: number, birth: number, span = GROW_SECONDS) {
   return Math.max(0, Math.min(1, (time - birth) / span));
 }
+
+export type FallingTree = {
+  x: number; z: number; s: number; birth: number;
+  fall?: { hole: HoleShape & { id: number }; started: number };
+};
+export const TREE_FALL_SECONDS = 2;
+export function createTrees(): FallingTree[] {
+  return Array.from({ length: 40 }, (_, i) => {
+    const a = i * 2.4, rr = 14 + ((i * 7) % 20);
+    return { x: Math.cos(a) * rr, z: Math.sin(a) * rr, s: 0.8 + ((i * 13) % 6) / 10, birth: i < 20 ? -100 : (i - 20) * 6 };
+  });
+}
+
+/** New holes pull nearby trees in, or the nearest tree when dug away from the forest. */
+export function attractTrees(trees: FallingTree[], hole: HoleShape & { id: number }, time: number, isNew: boolean) {
+  const standing = trees.filter((tr) => !tr.fall && tr.birth <= time);
+  const distance = (tr: FallingTree) => Math.hypot(tr.x - hole.x, tr.z - hole.z);
+  const nearby = standing.filter((tr) => distance(tr) <= hole.r + (isNew ? 3 : 0.2));
+  if (isNew && nearby.length === 0) {
+    const nearest = standing.reduce<FallingTree | undefined>((best, tr) => !best || distance(tr) < distance(best) ? tr : best, undefined);
+    if (nearest) nearby.push(nearest);
+  }
+  for (const tr of nearby) tr.fall = { hole, started: time };
+  // Keep fallen trees on the bottom when the same hole gets deeper.
+  for (const tr of trees) if (tr.fall?.hole.id === hole.id) tr.fall.hole = hole;
+}
+
+export function treePose(tr: FallingTree, time: number) {
+  const fall = tr.fall;
+  if (!fall) return { x: tr.x, y: 0, z: tr.z, tilt: 0, heading: 0 };
+  const p = growth(time, fall.started, TREE_FALL_SECONDS);
+  const slide = 1 - (1 - p) ** 3;
+  const drop = Math.max(0, (p - 0.35) / 0.65) ** 2;
+  return {
+    x: tr.x + (fall.hole.x - tr.x) * slide,
+    z: tr.z + (fall.hole.z - tr.z) * slide,
+    y: -fall.hole.d * drop,
+    tilt: Math.sin(p * Math.PI) * 0.65,
+    heading: Math.atan2(fall.hole.x - tr.x, fall.hole.z - tr.z),
+  };
+}
 export function inPond(x: number, z: number, pad = 0) {
   return ponds.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + pad);
 }

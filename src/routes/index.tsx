@@ -9,6 +9,8 @@ export const Route = createFileRoute("/")({
       { name: "description", content: "Гуляйте по лесу, зайдите в уютный домик с мебелью, окном и кухней." },
       { property: "og:title", content: "Домик в лесу — прогулка по 3D-миру" },
       { property: "og:description", content: "Гуляйте по лесу, зайдите в уютный домик с мебелью, окном и кухней." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
   component: World,
