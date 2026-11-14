@@ -54,3 +54,11 @@ export function growth(time: number, birth: number, span = GROW_SECONDS) {
 export function inPond(x: number, z: number, pad = 0) {
   return ponds.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + pad);
 }
+
+export const DIG_REACH = 1.6; // metres in front of the player
+export const MAX_HOLES = 150;
+/** Holes go only on open ground: not inside the house, not in ponds. */
+export function canDig(x: number, z: number) {
+  const inHouse = x > HOUSE.x1 - 0.3 && x < HOUSE.x2 + 0.3 && z > HOUSE.z1 - 0.3 && z < HOUSE.z2 + 0.3;
+  return !inHouse && !inPond(x, z, 0.5) && Math.abs(x) < 40 && Math.abs(z) < 40;
+}
