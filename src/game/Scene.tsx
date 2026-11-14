@@ -2,16 +2,17 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, Lightformer, PointerLockControls, Sky } from "@react-three/drei";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, canDig, DIG_REACH, MAX_HOLES, step, HOLE_START_R, HOLE_START_D, HOLE_MAX_R, HOLE_MAX_D, createTrees, attractTrees, treePose, fillHole, type FallingTree, type Body } from "./world";
+import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, DIG_REACH, step, createTrees, attractTrees, treePose, fillHole, digHole, digTunnel, recoverTrees, TUNNEL_WIDTH, TUNNEL_HEIGHT, type Tunnel, type FallingTree, type Body } from "./world";
 
 declare global {
   interface Window {
     __game?: {
       dig: (x: number, z: number) => void;
       fill: (x: number, z: number) => void;
+      tunnel: (dirX: number, dirZ: number) => void;
       sim: (seconds: number) => void;
       view?: (x: number, z: number, targetX: number, targetZ: number) => void;
-      readonly state: { player: Body; holes: Hole[]; trees: (ReturnType<typeof treePose> & { buried: boolean })[] };
+      readonly state: { player: Body; holes: Hole[]; tunnels: Tunnel[]; trees: (ReturnType<typeof treePose> & { buried: boolean })[] };
     };
   }
 }
@@ -244,10 +245,11 @@ function Growth({ holes, trees, time, advance }: { holes: React.RefObject<Hole[]
   );
 }
 
-function Player({ onDig, onFill, holes, pos, advance }: { onDig: (x: number, z: number) => void; onFill: (x: number, z: number) => void; holes: React.RefObject<Hole[]>; pos: React.RefObject<Body>; advance: React.RefObject<(dt: number) => void> }) {
+function Player({ onDig, onFill, onTunnel, holes, tunnels, pos, advance }: { onDig: (x: number, z: number) => void; onFill: (x: number, z: number) => void; onTunnel: (x: number, z: number) => void; holes: React.RefObject<Hole[]>; tunnels: React.RefObject<Tunnel[]>; pos: React.RefObject<Body>; advance: React.RefObject<(dt: number) => void> }) {
   const { camera } = useThree();
   const keys = useRef<Record<string, boolean>>({});
   const earth = useRef<THREE.Mesh>(null);
+  const lantern = useRef<THREE.PointLight>(null);
   const { wood } = useTextures();
   useEffect(() => {
     camera.position.set(0, EYE, 6);
@@ -259,11 +261,12 @@ function Player({ onDig, onFill, holes, pos, advance }: { onDig: (x: number, z: 
     };
     const d = (e: KeyboardEvent) => {
       keys.current[e.code] = true;
-      if ((e.code === "KeyE" || e.code === "KeyF") && !e.repeat) {
+      if ((e.code === "KeyE" || e.code === "KeyF" || e.code === "KeyT") && !e.repeat) {
         const dir = new THREE.Vector3();
         camera.getWorldDirection(dir); dir.y = 0; dir.normalize();
         const x = pos.current.x + dir.x * DIG_REACH, z = pos.current.z + dir.z * DIG_REACH;
-        if (e.code === "KeyE") {
+        if (e.code === "KeyT") onTunnel(dir.x, dir.z);
+        else if (e.code === "KeyE") {
           const inside = pos.current.y < 0 && holes.current.some((h) => Math.hypot(h.x - pos.current.x, h.z - pos.current.z) < h.r);
           onDig(inside ? pos.current.x : x, inside ? pos.current.z : z);
         }
@@ -276,7 +279,7 @@ function Player({ onDig, onFill, holes, pos, advance }: { onDig: (x: number, z: 
     const u = (e: KeyboardEvent) => (keys.current[e.code] = false);
     window.addEventListener("keydown", d); window.addEventListener("keyup", u);
     return () => { window.removeEventListener("keydown", d); window.removeEventListener("keyup", u); };
-  }, [camera, onDig, onFill, holes, pos]);
+  }, [camera, onDig, onFill, onTunnel, holes, pos]);
   const f = new THREE.Vector3(), r = new THREE.Vector3();
   const tick = (dt: number) => {
     const k = keys.current;
@@ -285,8 +288,9 @@ function Player({ onDig, onFill, holes, pos, advance }: { onDig: (x: number, z: 
     camera.getWorldDirection(f); f.y = 0; f.normalize();
     r.crossVectors(f, camera.up).normalize();
     const mx = (f.x * fw + r.x * st) * SPEED * dt, mz = (f.z * fw + r.z * st) * SPEED * dt;
-    pos.current = step(pos.current, mx, mz, !!k["Space"], holes.current, dt);
+    pos.current = step(pos.current, mx, mz, !!k["Space"], holes.current, dt, tunnels.current);
     camera.position.set(pos.current.x, pos.current.y + EYE, pos.current.z);
+    if (lantern.current) lantern.current.position.copy(camera.position);
     if (earth.current) {
       earth.current.visible = !!pos.current.buried;
       earth.current.position.copy(camera.position);
@@ -294,10 +298,10 @@ function Player({ onDig, onFill, holes, pos, advance }: { onDig: (x: number, z: 
   };
   advance.current = tick;
   useFrame((_, delta) => tick(Math.min(delta, 0.05)));
-  return <mesh ref={earth} visible={false} renderOrder={1000}>
+  return <><pointLight ref={lantern} intensity={7} distance={9} decay={1.5} /><mesh ref={earth} visible={false} renderOrder={1000}>
     <sphereGeometry args={[0.3, 16, 12]} />
     <meshBasicMaterial map={wood} color="#5a3b22" side={THREE.BackSide} depthTest={false} depthWrite={false} />
-  </mesh>;
+  </mesh></>;
 }
 
 type Hole = { x: number; z: number; r: number; d: number; id: number };
@@ -305,23 +309,65 @@ const holeMask = new THREE.MeshBasicMaterial({
   colorWrite: false, depthWrite: false, stencilWrite: true, stencilRef: 1,
   stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp,
 });
-function Holes({ holes }: { holes: Hole[] }) {
+function Holes({ holes, tunnels }: { holes: Hole[]; tunnels: Tunnel[] }) {
+  const soil = useMemo(() => canvasTex((c) => {
+    c.fillStyle = "#6b4a2b"; c.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 3500; i++) {
+      c.fillStyle = ["#5a3b22", "#7a5533", "#8a7a5a"][i % 3] ?? "#5a3b22";
+      c.fillRect(Math.random() * 256, Math.random() * 256, 2 + i % 4, 2);
+    }
+  }, 1), []);
+  useEffect(() => () => soil.dispose(), [soil]);
+  const geometry = useMemo(() => {
+    if (!tunnels.length) return null;
+    const size = 0.25;
+    const levels = [...new Set([0, ...holes.map((h) => -h.d), ...tunnels.flatMap((t) => [t.floor, t.floor + TUNNEL_HEIGHT])])].sort((a, b) => a - b);
+    const cells = new Set<string>();
+    const key = (x: number, y: number, z: number) => `${x},${y},${z}`;
+    const regions = [...holes.map((h) => ({ x: h.x, z: h.z, r: h.r })), ...tunnels.map((t) => ({ x: t.x, z: t.z, r: TUNNEL_WIDTH / 2 }))];
+    for (const region of regions) for (let ix = Math.floor((region.x - region.r) / size); ix <= Math.ceil((region.x + region.r) / size); ix++) for (let iz = Math.floor((region.z - region.r) / size); iz <= Math.ceil((region.z + region.r) / size); iz++) {
+      const x = (ix + 0.5) * size, z = (iz + 0.5) * size;
+      for (let iy = 0; iy < levels.length - 1; iy++) {
+        const y = ((levels[iy] ?? 0) + (levels[iy + 1] ?? 0)) / 2;
+        if (holes.some((h) => y < 0 && y > -h.d && Math.hypot(x - h.x, z - h.z) < h.r) || tunnels.some((t) => y > t.floor && y < t.floor + TUNNEL_HEIGHT && Math.abs(x - t.x) <= TUNNEL_WIDTH / 2 && Math.abs(z - t.z) <= TUNNEL_WIDTH / 2)) cells.add(key(ix, iy, iz));
+      }
+    }
+    const vertices: number[] = [], uv: number[] = [];
+    const face = (a: V3, b: V3, c: V3, d: V3) => { for (const v of [a, b, c, a, c, d]) { vertices.push(...v); uv.push(v[0] + v[2], v[1] + v[2]); } };
+    for (const cell of cells) {
+      const [ix = 0, iy = 0, iz = 0] = cell.split(",").map(Number);
+      const x = ix * size, z = iz * size, y = levels[iy] ?? 0, top = levels[iy + 1] ?? 0, right = x + size, back = z + size;
+      if (!cells.has(key(ix - 1, iy, iz))) face([x,y,z],[x,top,z],[x,top,back],[x,y,back]);
+      if (!cells.has(key(ix + 1, iy, iz))) face([right,y,z],[right,y,back],[right,top,back],[right,top,z]);
+      if (!cells.has(key(ix, iy, iz - 1))) face([x,y,z],[right,y,z],[right,top,z],[x,top,z]);
+      if (!cells.has(key(ix, iy, iz + 1))) face([x,y,back],[x,top,back],[right,top,back],[right,y,back]);
+      if (!cells.has(key(ix, iy - 1, iz))) face([x,y,z],[x,y,back],[right,y,back],[right,y,z]);
+      if (top < 0 && !cells.has(key(ix, iy + 1, iz))) face([x,top,z],[right,top,z],[right,top,back],[x,top,back]);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    g.computeVertexNormals();
+    return g;
+  }, [holes, tunnels]);
+  useEffect(() => () => { geometry?.dispose(); }, [geometry]);
   return (
     <>
+      {geometry && <mesh geometry={geometry}><meshStandardMaterial map={soil} side={THREE.DoubleSide} /></mesh>}
       {holes.map((h) => (
         <group key={h.id} position={[h.x, 0, h.z]}>
           {/* cuts the grass so you can see down into the hole */}
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]} material={holeMask} renderOrder={-1}>
             <circleGeometry args={[h.r, 32]} />
           </mesh>
-          <mesh position={[0, -h.d / 2, 0]}>
+          {!geometry && <mesh position={[0, -h.d / 2, 0]}>
             <cylinderGeometry args={[h.r, h.r * 0.9, h.d, 32, 1, true]} />
             <meshStandardMaterial color="#5a3b22" side={THREE.BackSide} />
-          </mesh>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -h.d + 0.01, 0]}>
+          </mesh>}
+          {!geometry && <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -h.d + 0.01, 0]}>
             <circleGeometry args={[h.r * 0.9, 32]} />
             <meshStandardMaterial color="#3a2614" />
-          </mesh>
+          </mesh>}
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
             <ringGeometry args={[h.r * 0.96, h.r + 0.25, 32]} />
             <meshStandardMaterial color="#6b4a2b" />
@@ -347,6 +393,8 @@ export default function World() {
   const [locked, setLocked] = useState(false);
   const [holes, setHoles] = useState<Hole[]>([]);
   const holesRef = useRef<Hole[]>([]);
+  const [tunnels, setTunnels] = useState<Tunnel[]>([]);
+  const tunnelsRef = useRef<Tunnel[]>([]);
   const treesRef = useRef(createTrees());
   const timeRef = useRef(0);
   const advanceRef = useRef<(seconds: number) => void>(() => {});
@@ -354,21 +402,26 @@ export default function World() {
   const playerAdvanceRef = useRef<(dt: number) => void>(() => {});
   holesRef.current = holes;
   const onDig = useCallback((x: number, z: number) => {
-    if (!canDig(x, z)) return;
-    setHoles((hs) => {
-      const near = hs.find((h) => Math.hypot(h.x - x, h.z - z) < h.r + 0.2);
-      if (near)
-        return hs.map((h) =>
-          h === near
-            ? { ...h, r: Math.min(h.r + 0.15, HOLE_MAX_R), d: Math.min(h.d + 0.5, HOLE_MAX_D) }
-            : h,
-        );
-      return [...hs, { x, z, r: HOLE_START_R, d: HOLE_START_D, id: Date.now() + Math.random() }].slice(-MAX_HOLES);
-    });
+    const next = digHole(holesRef.current, x, z, Date.now() + Math.random());
+    for (const pit of next) recoverTrees(treesRef.current, pit, timeRef.current);
+    holesRef.current = next;
+    setHoles(next);
+    advanceRef.current(0);
+  }, []);
+  const onTunnel = useCallback((x: number, z: number) => {
+    const next = digTunnel(holesRef.current, tunnelsRef.current, playerRef.current, x, z);
+    tunnelsRef.current = next;
+    setTunnels(next);
   }, []);
   const onFill = useCallback((x: number, z: number) => {
     const result = fillHole(holesRef.current, treesRef.current, x, z, playerRef.current);
     if (result.player) playerRef.current = result.player;
+    const filledIds = holesRef.current.filter((h) => !result.holes.some((p) => p.id === h.id)).map((h) => h.id);
+    const remaining = tunnelsRef.current.filter((t) => !filledIds.includes(t.shaft));
+    const passage = tunnelsRef.current.find((t) => filledIds.includes(t.shaft) && Math.abs(t.x - playerRef.current.x) < TUNNEL_WIDTH / 2 && Math.abs(t.z - playerRef.current.z) < TUNNEL_WIDTH / 2);
+    if (passage && playerRef.current.y < 0) playerRef.current.buried = { x: playerRef.current.x, z: playerRef.current.z, r: 1, d: -passage.floor };
+    tunnelsRef.current = remaining;
+    setTunnels(remaining);
     holesRef.current = result.holes;
     treesRef.current = result.trees;
     setHoles(result.holes);
@@ -380,15 +433,16 @@ export default function World() {
     window.__game = {
       dig: onDig,
       fill: onFill,
+      tunnel: onTunnel,
       sim: (seconds) => {
         advanceRef.current(seconds);
         for (let remaining = seconds; remaining > 0; remaining -= 1 / 60) playerAdvanceRef.current(Math.min(remaining, 1 / 60));
       },
       ...(previousView ? { view: previousView } : {}),
-      get state() { return { player: { ...playerRef.current }, holes: holesRef.current, trees: treesRef.current.map((tr) => ({ ...treePose(tr, timeRef.current), buried: !!tr.buried })) }; },
+      get state() { return { player: { ...playerRef.current }, holes: holesRef.current, tunnels: tunnelsRef.current, trees: treesRef.current.map((tr) => ({ ...treePose(tr, timeRef.current), buried: !!tr.buried })) }; },
     };
     return () => { delete window.__game; };
-  }, [onDig, onFill]);
+  }, [onDig, onFill, onTunnel]);
   const { grass } = useTextures();
   return (
     <div className="game-root" data-scene-ready={ready ? "" : undefined}>
@@ -413,8 +467,8 @@ export default function World() {
         <House />
         <Ponds />
         <Growth holes={holesRef} trees={treesRef} time={timeRef} advance={advanceRef} />
-        <Player onDig={onDig} onFill={onFill} holes={holesRef} pos={playerRef} advance={playerAdvanceRef} />
-        <Holes holes={holes} />
+        <Player onDig={onDig} onFill={onFill} onTunnel={onTunnel} holes={holesRef} tunnels={tunnelsRef} pos={playerRef} advance={playerAdvanceRef} />
+        <Holes holes={holes} tunnels={tunnels} />
         <PointerLockControls onLock={() => setLocked(true)} onUnlock={() => setLocked(false)} />
         <Ready onReady={() => setReady(true)} />
       </Canvas>
@@ -422,7 +476,7 @@ export default function World() {
         <div className="game-overlay">
           <h1>Домик в лесу</h1>
           <p>Нажмите, чтобы войти в мир</p>
-          <p className="hint">W A S D — ходить · мышь — смотреть · E — копать · F — закапывать · пробел — прыжок · Esc — пауза</p>
+          <p className="hint">W A S D — ходить · мышь — смотреть · E — копать · T — туннель · F — закапывать · пробел — прыжок · Esc — пауза</p>
         </div>
       )}
       {locked && <div className="game-crosshair" />}

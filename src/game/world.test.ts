@@ -1,11 +1,55 @@
 import { describe, expect, it } from "vitest";
-import { HOLE_START_D, HOLE_MAX_D, step, attractTrees, treePose, fillHole, TREE_FALL_SECONDS, type FallingTree, type Body } from "./world";
+import { HOLE_START_D, HOLE_MAX_D, step, attractTrees, treePose, fillHole, digHole, digTunnel, recoverTrees, TREE_FALL_SECONDS, type FallingTree, type Body } from "./world";
 
 const hole = [{ x: 0, z: 10, r: 1, d: HOLE_START_D }];
 const run = (b: Body, n: number, jump = false, dx = 0, dz = 0) => {
   for (let i = 0; i < n; i++) b = step(b, dx, dz, jump && i === 0, hole, 1 / 60);
   return b;
 };
+
+describe("tunnels and recovering trees", () => {
+  const pit = { x: 0, z: 15, r: 1.2, d: 3.2, id: 1 };
+  it("can dig and walk along an underground passage without exposing the surface", () => {
+    const start = { x: 0, y: -3.2, z: 15, vy: 0 };
+    const tunnels = digTunnel([pit], [], start, 1, 0);
+    expect(tunnels).toHaveLength(1);
+    let b = start;
+    for (let i = 0; i < 30; i++) b = step(b, 0.05, 0, false, [pit], 1 / 60, tunnels);
+    expect(b.x).toBeCloseTo(1.5);
+    expect(b.y).toBe(-3.2);
+    const next = digTunnel([pit], tunnels, b, 1, 0);
+    expect(next).toHaveLength(2);
+    expect(step({ ...b, y: 0 }, 0, 0, false, [pit], 1 / 60, next).y).toBe(0);
+  });
+  it("solid earth blocks movement past the tunnel end", () => {
+    const tunnels = digTunnel([pit], [], { x: 0, y: -3.2, z: 15, vy: 0 }, 1, 0);
+    let b = { x: 0, y: -3.2, z: 15, vy: 0 };
+    for (let i = 0; i < 100; i++) b = step(b, 0.05, 0, false, [pit], 1 / 60, tunnels);
+    expect(b.x).toBeLessThan(2.2);
+    expect(b.y).toBe(-3.2);
+  });
+  it("returns through the tunnel to the shaft and jumps out", () => {
+    const tunnels = digTunnel([pit], [], { x: 0, y: -3.2, z: 15, vy: 0 }, 1, 0);
+    let b = { x: 1.5, y: -3.2, z: 15, vy: 0 };
+    for (let i = 0; i < 30; i++) b = step(b, -0.05, 0, false, [pit], 1 / 60, tunnels);
+    let peak = b.y;
+    for (let i = 0; i < 90; i++) { b = step(b, 0, 0, i === 0, [pit], 1 / 60, tunnels); peak = Math.max(peak, b.y); }
+    expect(peak).toBeGreaterThan(0);
+  });
+  it("reopens a filled pit and uncovers the same tree at its burial depth", () => {
+    const tree: FallingTree = { x: 0, z: 15, s: 1, birth: -100, fall: { hole: pit, started: 0 } };
+    const filled = fillHole([pit], [tree], 0, 15);
+    let holes = digHole(filled.holes, 0, 15, 2);
+    recoverTrees(filled.trees, holes[0] ?? pit, 10);
+    expect(filled.trees[0]?.buried).toBe(true);
+    for (let i = 0; i < 4; i++) holes = digHole(holes, 0, 15, 3);
+    recoverTrees(filled.trees, holes[0] ?? pit, 10);
+    expect(filled.trees[0]?.buried).toBe(false);
+    expect(filled.trees[0]?.fall?.hole.id).toBe(2);
+    expect(treePose(filled.trees[0] ?? tree, 10).y).toBeCloseTo(-3.2);
+    expect(fillHole(holes, filled.trees, 0, 15).trees[0]?.buried).toBe(true);
+  });
+});
 
 describe("deep holes", () => {
   it("player standing over a hole falls to its bottom", () => {

@@ -107,6 +107,48 @@ export function canDig(x: number, z: number) {
 
 // ---- Deep holes & vertical movement ----
 export type HoleShape = { x: number; z: number; r: number; d: number };
+export type Pit = HoleShape & { id: number };
+export type Tunnel = { x: number; z: number; floor: number; shaft: number };
+export const TUNNEL_WIDTH = 2;
+export const TUNNEL_HEIGHT = 2.2;
+export const TUNNEL_REACH = 1.2;
+
+export function tunnelAt(tunnels: Tunnel[], x: number, z: number, y: number, pad = 0) {
+  return tunnels.find((t) => Math.abs(t.x - x) <= TUNNEL_WIDTH / 2 - pad && Math.abs(t.z - z) <= TUNNEL_WIDTH / 2 - pad && y >= t.floor - 0.1 && y < t.floor + TUNNEL_HEIGHT);
+}
+
+/** Extend a connected passage from an underground player's position. */
+export function digTunnel(holes: Pit[], tunnels: Tunnel[], player: Body, dirX: number, dirZ: number) {
+  if (player.buried || player.y > -TUNNEL_HEIGHT - 0.2) return tunnels;
+  const shaft = holeAt(holes, player.x, player.z);
+  const passage = tunnelAt(tunnels, player.x, player.z, player.y);
+  const id = shaft?.id ?? passage?.shaft;
+  if (id === undefined) return tunnels;
+  const length = Math.hypot(dirX, dirZ);
+  if (length < 0.01) return tunnels;
+  const x = player.x + dirX / length * TUNNEL_REACH;
+  const z = player.z + dirZ / length * TUNNEL_REACH;
+  if (!canDig(x, z) || tunnelAt(tunnels, x, z, player.y, 0.4)) return tunnels;
+  return [...tunnels, { x, z, floor: passage?.floor ?? -(shaft?.d ?? 3), shaft: id }];
+}
+
+/** Reopening earth reveals a buried tree only once the dig reaches its roots. */
+export function recoverTrees(trees: FallingTree[], pit: Pit, time: number) {
+  for (const tr of trees) {
+    const old = tr.fall?.hole;
+    if (tr.buried && old && Math.hypot(old.x - pit.x, old.z - pit.z) < pit.r && pit.d >= old.d) {
+      tr.buried = false;
+      tr.fall = { hole: pit, started: time - TREE_FALL_SECONDS };
+    }
+  }
+}
+
+export function digHole(holes: Pit[], x: number, z: number, id: number): Pit[] {
+  if (!canDig(x, z)) return holes;
+  const near = holes.find((h) => Math.hypot(h.x - x, h.z - z) < h.r + 0.2);
+  if (near) return holes.map((h) => h === near ? { ...h, r: Math.min(h.r + 0.15, HOLE_MAX_R), d: Math.min(h.d + 0.5, HOLE_MAX_D) } : h);
+  return [...holes, { x, z, r: HOLE_START_R, d: HOLE_START_D, id }].slice(-MAX_HOLES);
+}
 /** Fill the targeted pit completely, burying any tree that fell into it. */
 export function fillHole<H extends HoleShape & { id: number }>(holes: H[], trees: FallingTree[], x: number, z: number, player?: Body) {
   const target = holes
@@ -130,12 +172,12 @@ export const JUMP = 5.5; // normal hop
 export const climbFor = (d: number) => Math.sqrt(2 * GRAVITY * (d + 0.6));
 export type Body = { x: number; y: number; z: number; vy: number; buried?: HoleShape };
 
-export function holeAt(holes: HoleShape[], x: number, z: number) {
+export function holeAt<H extends HoleShape>(holes: H[], x: number, z: number): H | undefined {
   return holes.find((h) => h.r > RADIUS && Math.hypot(x - h.x, z - h.z) < h.r - RADIUS * 0.5);
 }
 
 /** One physics step: horizontal move (walls of a hole block you while below ground), gravity, jump. */
-export function step(b: Body, dx: number, dz: number, jump: boolean, holes: HoleShape[], dt: number): Body {
+export function step(b: Body, dx: number, dz: number, jump: boolean, holes: HoleShape[], dt: number, tunnels: Tunnel[] = []): Body {
   let { x, y, z, vy } = b;
   if (b.buried) {
     const bottom = -b.buried.d;
@@ -147,19 +189,23 @@ export function step(b: Body, dx: number, dz: number, jump: boolean, holes: Hole
     return { x, y, z, vy, buried: b.buried };
   }
   if (y < -0.05) {
-    const h = holes.find((h) => Math.hypot(x - h.x, z - h.z) < h.r + 0.01);
-    const fits = (px: number, pz: number) => !h || Math.hypot(px - h.x, pz - h.z) <= h.r - RADIUS * 0.5;
+    const fits = (px: number, pz: number) => holes.some((h) => y >= -h.d - 0.1 && Math.hypot(px - h.x, pz - h.z) <= h.r - RADIUS * 0.5) || !!tunnelAt(tunnels, px, pz, y, RADIUS * 0.5);
     if (fits(x + dx, z)) x += dx;
     if (fits(x, z + dz)) z += dz;
   } else {
     ({ x, z } = move(x, z, dx, dz));
   }
   const inHole = holeAt(holes, x, z);
-  const ground = inHole ? -inHole.d : 0;
+  const passage = y < 0 ? tunnelAt(tunnels, x, z, y) : undefined;
+  const ground = inHole ? -inHole.d : passage?.floor ?? 0;
   const onGround = y <= ground + 0.001 && vy <= 0;
   if (onGround && jump) vy = inHole ? climbFor(inHole.d) : JUMP;
   vy -= GRAVITY * dt;
   y += vy * dt;
+  if (!inHole && passage && y + EYE > passage.floor + TUNNEL_HEIGHT - 0.1) {
+    y = passage.floor + TUNNEL_HEIGHT - EYE - 0.1;
+    vy = Math.min(0, vy);
+  }
   if (y <= ground) { y = ground; vy = 0; }
   return { x, y, z, vy };
 }
