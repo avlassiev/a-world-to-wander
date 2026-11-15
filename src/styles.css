@@ -73,6 +73,12 @@
 }
 
 :root {
+  --game-tunnel-wood: #b5804f;
+  --game-tunnel-cabinet: #3f6e8c;
+  --game-tunnel-metal: #b8c2c8;
+  --game-tunnel-dark: #30383c;
+  --game-tunnel-ceramic: #f3efe6;
+  --game-tunnel-lamp: #ffe6b0;
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.129 0.042 264.695);

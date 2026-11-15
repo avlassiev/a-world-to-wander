@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HOLE_START_D, HOLE_MAX_D, step, attractTrees, treePose, fillHole, digHole, digTunnel, recoverTrees, TREE_FALL_SECONDS, type FallingTree, type Body } from "./world";
+import { HOLE_START_D, HOLE_MAX_D, step, attractTrees, treePose, fillHole, digHole, digTunnel, tunnelFurnishings, recoverTrees, TREE_FALL_SECONDS, type FallingTree, type Body } from "./world";
 
 const hole = [{ x: 0, z: 10, r: 1, d: HOLE_START_D }];
 const run = (b: Body, n: number, jump = false, dx = 0, dz = 0) => {
@@ -9,6 +9,31 @@ const run = (b: Body, n: number, jump = false, dx = 0, dz = 0) => {
 
 describe("tunnels and recovering trees", () => {
   const pit = { x: 0, z: 15, r: 1.2, d: 3.2, id: 1 };
+  it("places a table and kitchen in the first dug passage, not every extension", () => {
+    const tunnels = [{ x: 1.2, z: 15, floor: -3.2, shaft: 1 }, { x: 2.4, z: 15, floor: -3.2, shaft: 1 }];
+    const rooms = tunnelFurnishings(tunnels);
+    expect(rooms).toHaveLength(1);
+    expect(rooms[0]?.table.z1).toBe(13);
+    expect(rooms[0]?.kitchen.z1).toBe(16.65);
+    expect(rooms[0]?.chairs).toHaveLength(2);
+    expect(rooms[0]?.toilet.z2).toBe(17.2);
+    expect(tunnelFurnishings([])).toEqual([]);
+  });
+  it("keeps the centre walkable and blocks walking through the table and kitchen", () => {
+    const tunnels = [{ x: 0, z: 15, floor: -3.2, shaft: 1, room: true }];
+    const start = { x: 0, y: -3.2, z: 15, vy: 0 };
+    expect(step(start, 0, 0.1, false, [], 1 / 60, tunnels).z).toBe(15.1);
+    expect(step({ ...start, x: -1.3, z: 13.9 }, 0, -0.1, false, [], 1 / 60, tunnels).z).toBe(13.9);
+    expect(step({ ...start, z: 16.3 }, 0, 0.2, false, [], 1 / 60, tunnels).z).toBe(16.3);
+  });
+  it("filling the entrance preserves the room, furniture and player inside it", () => {
+    const tunnels = digTunnel([pit], [], { x: 0, y: -3.2, z: 15, vy: 0 }, 1, 0);
+    const player = { x: 2.8, y: -3.2, z: 15, vy: 0 };
+    const filled = fillHole([pit], [], 0, 15, player);
+    expect(tunnelFurnishings(tunnels)).toHaveLength(1);
+    expect(step(filled.player ?? player, 0, 0, false, filled.holes, 1 / 60, tunnels)).toMatchObject({ y: -3.2 });
+    expect(filled.player?.buried).toBeUndefined();
+  });
   it("can dig and walk along an underground passage without exposing the surface", () => {
     const start = { x: 0, y: -3.2, z: 15, vy: 0 };
     const tunnels = digTunnel([pit], [], start, 1, 0);
@@ -17,7 +42,7 @@ describe("tunnels and recovering trees", () => {
     for (let i = 0; i < 30; i++) b = step(b, 0.05, 0, false, [pit], 1 / 60, tunnels);
     expect(b.x).toBeCloseTo(1.5);
     expect(b.y).toBe(-3.2);
-    const next = digTunnel([pit], tunnels, b, 1, 0);
+    const next = digTunnel([pit], tunnels, { ...b, x: 3 }, 1, 0);
     expect(next).toHaveLength(2);
     expect(step({ ...b, y: 0 }, 0, 0, false, [pit], 1 / 60, next).y).toBe(0);
   });
@@ -25,7 +50,7 @@ describe("tunnels and recovering trees", () => {
     const tunnels = digTunnel([pit], [], { x: 0, y: -3.2, z: 15, vy: 0 }, 1, 0);
     let b = { x: 0, y: -3.2, z: 15, vy: 0 };
     for (let i = 0; i < 100; i++) b = step(b, 0.05, 0, false, [pit], 1 / 60, tunnels);
-    expect(b.x).toBeLessThan(2.2);
+    expect(b.x).toBeLessThan(3.6);
     expect(b.y).toBe(-3.2);
   });
   it("returns through the tunnel to the shaft and jumps out", () => {

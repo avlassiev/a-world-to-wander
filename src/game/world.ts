@@ -108,13 +108,31 @@ export function canDig(x: number, z: number) {
 // ---- Deep holes & vertical movement ----
 export type HoleShape = { x: number; z: number; r: number; d: number };
 export type Pit = HoleShape & { id: number };
-export type Tunnel = { x: number; z: number; floor: number; shaft: number };
+export type Tunnel = { x: number; z: number; floor: number; shaft: number; room?: boolean };
 export const TUNNEL_WIDTH = 2;
+export const ROOM_WIDTH = 4.8;
+export const tunnelWidth = (t: Tunnel) => t.room ? ROOM_WIDTH : TUNNEL_WIDTH;
 export const TUNNEL_HEIGHT = 2.2;
 export const TUNNEL_REACH = 1.2;
 
+/** One compact furnished area per shaft, leaving the centre of the passage open. */
+export function tunnelFurnishings(tunnels: Tunnel[]) {
+  const shafts = new Set<number>();
+  return tunnels.filter((t) => {
+    if (shafts.has(t.shaft)) return false;
+    shafts.add(t.shaft);
+    return true;
+  }).map((t) => ({
+    ...t,
+    table: { x1: t.x - 1.9, x2: t.x - 0.7, z1: t.z - 2, z2: t.z - 1.3 },
+    chairs: [-1.85, -0.85].map((offset) => ({ x1: t.x + offset - 0.2, x2: t.x + offset + 0.2, z1: t.z - 1.1, z2: t.z - 0.7 })),
+    kitchen: { x1: t.x - 1.9, x2: t.x + 0.6, z1: t.z + 1.65, z2: t.z + 2.25 },
+    toilet: { x1: t.x + 1.25, x2: t.x + 1.85, z1: t.z + 1.3, z2: t.z + 2.2 },
+  }));
+}
+
 export function tunnelAt(tunnels: Tunnel[], x: number, z: number, y: number, pad = 0) {
-  return tunnels.find((t) => Math.abs(t.x - x) <= TUNNEL_WIDTH / 2 - pad && Math.abs(t.z - z) <= TUNNEL_WIDTH / 2 - pad && y >= t.floor - 0.1 && y < t.floor + TUNNEL_HEIGHT);
+  return tunnels.find((t) => Math.abs(t.x - x) <= tunnelWidth(t) / 2 - pad && Math.abs(t.z - z) <= tunnelWidth(t) / 2 - pad && y >= t.floor - 0.1 && y < t.floor + TUNNEL_HEIGHT);
 }
 
 /** Extend a connected passage from an underground player's position. */
@@ -129,7 +147,7 @@ export function digTunnel(holes: Pit[], tunnels: Tunnel[], player: Body, dirX: n
   const x = player.x + dirX / length * TUNNEL_REACH;
   const z = player.z + dirZ / length * TUNNEL_REACH;
   if (!canDig(x, z) || tunnelAt(tunnels, x, z, player.y, 0.4)) return tunnels;
-  return [...tunnels, { x, z, floor: passage?.floor ?? -(shaft?.d ?? 3), shaft: id }];
+  return [...tunnels, { x, z, floor: passage?.floor ?? -(shaft?.d ?? 3), shaft: id, room: !tunnels.some((t) => t.shaft === id) }];
 }
 
 /** Reopening earth reveals a buried tree only once the dig reaches its roots. */
@@ -189,7 +207,11 @@ export function step(b: Body, dx: number, dz: number, jump: boolean, holes: Hole
     return { x, y, z, vy, buried: b.buried };
   }
   if (y < -0.05) {
-    const fits = (px: number, pz: number) => holes.some((h) => y >= -h.d - 0.1 && Math.hypot(px - h.x, pz - h.z) <= h.r - RADIUS * 0.5) || !!tunnelAt(tunnels, px, pz, y, RADIUS * 0.5);
+    const furniture = tunnelFurnishings(tunnels).flatMap((t) => y >= t.floor - 0.1 && y < t.floor + 0.95 ? [t.table, t.kitchen, t.toilet, ...t.chairs] : []);
+    const fits = (px: number, pz: number) => {
+      if (furniture.some((b) => px + RADIUS > b.x1 && px - RADIUS < b.x2 && pz + RADIUS > b.z1 && pz - RADIUS < b.z2)) return false;
+      return holes.some((h) => y >= -h.d - 0.1 && Math.hypot(px - h.x, pz - h.z) <= h.r - RADIUS * 0.5) || !!tunnelAt(tunnels, px, pz, y, RADIUS * 0.5);
+    };
     if (fits(x + dx, z)) x += dx;
     if (fits(x, z + dz)) z += dz;
   } else {

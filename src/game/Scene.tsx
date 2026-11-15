@@ -2,7 +2,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, Lightformer, PointerLockControls, Sky } from "@react-three/drei";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, DIG_REACH, step, createTrees, attractTrees, treePose, fillHole, digHole, digTunnel, recoverTrees, TUNNEL_WIDTH, TUNNEL_HEIGHT, type Tunnel, type FallingTree, type Body } from "./world";
+import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, DIG_REACH, step, createTrees, attractTrees, treePose, fillHole, digHole, digTunnel, recoverTrees, TUNNEL_HEIGHT, tunnelWidth, tunnelFurnishings, type Tunnel, type FallingTree, type Body } from "./world";
 
 declare global {
   interface Window {
@@ -12,7 +12,7 @@ declare global {
       tunnel: (dirX: number, dirZ: number) => void;
       sim: (seconds: number) => void;
       view?: (x: number, z: number, targetX: number, targetZ: number) => void;
-      readonly state: { player: Body; holes: Hole[]; tunnels: Tunnel[]; trees: (ReturnType<typeof treePose> & { buried: boolean })[] };
+      readonly state: { player: Body; holes: Hole[]; tunnels: Tunnel[]; furnishings: ReturnType<typeof tunnelFurnishings>; trees: (ReturnType<typeof treePose> & { buried: boolean })[] };
     };
   }
 }
@@ -324,12 +324,12 @@ function Holes({ holes, tunnels }: { holes: Hole[]; tunnels: Tunnel[] }) {
     const levels = [...new Set([0, ...holes.map((h) => -h.d), ...tunnels.flatMap((t) => [t.floor, t.floor + TUNNEL_HEIGHT])])].sort((a, b) => a - b);
     const cells = new Set<string>();
     const key = (x: number, y: number, z: number) => `${x},${y},${z}`;
-    const regions = [...holes.map((h) => ({ x: h.x, z: h.z, r: h.r })), ...tunnels.map((t) => ({ x: t.x, z: t.z, r: TUNNEL_WIDTH / 2 }))];
+    const regions = [...holes.map((h) => ({ x: h.x, z: h.z, r: h.r })), ...tunnels.map((t) => ({ x: t.x, z: t.z, r: tunnelWidth(t) / 2 }))];
     for (const region of regions) for (let ix = Math.floor((region.x - region.r) / size); ix <= Math.ceil((region.x + region.r) / size); ix++) for (let iz = Math.floor((region.z - region.r) / size); iz <= Math.ceil((region.z + region.r) / size); iz++) {
       const x = (ix + 0.5) * size, z = (iz + 0.5) * size;
       for (let iy = 0; iy < levels.length - 1; iy++) {
         const y = ((levels[iy] ?? 0) + (levels[iy + 1] ?? 0)) / 2;
-        if (holes.some((h) => y < 0 && y > -h.d && Math.hypot(x - h.x, z - h.z) < h.r) || tunnels.some((t) => y > t.floor && y < t.floor + TUNNEL_HEIGHT && Math.abs(x - t.x) <= TUNNEL_WIDTH / 2 && Math.abs(z - t.z) <= TUNNEL_WIDTH / 2)) cells.add(key(ix, iy, iz));
+        if (holes.some((h) => y < 0 && y > -h.d && Math.hypot(x - h.x, z - h.z) < h.r) || tunnels.some((t) => y > t.floor && y < t.floor + TUNNEL_HEIGHT && Math.abs(x - t.x) <= tunnelWidth(t) / 2 && Math.abs(z - t.z) <= tunnelWidth(t) / 2)) cells.add(key(ix, iy, iz));
       }
     }
     const vertices: number[] = [], uv: number[] = [];
@@ -380,6 +380,44 @@ function Holes({ holes, tunnels }: { holes: Hole[]; tunnels: Tunnel[] }) {
       ))}
     </>
   );
+}
+
+function TunnelFurniture({ tunnels }: { tunnels: Tunnel[] }) {
+  const colors = useMemo(() => {
+    const css = getComputedStyle(document.documentElement);
+    const token = (name: string) => css.getPropertyValue(`--game-tunnel-${name}`).trim();
+    return { wood: token("wood"), cabinet: token("cabinet"), metal: token("metal"), dark: token("dark"), ceramic: token("ceramic"), lamp: token("lamp") };
+  }, []);
+  return <>{tunnelFurnishings(tunnels).map((room) => <group key={room.shaft} position={[room.x, room.floor, room.z]} name="tunnel-furnished-room">
+    <group name="table">
+      <B p={[-1.3, 0.76, -1.65]} s={[1.2, 0.08, 0.7]} c={colors.wood} />
+      {[-1.8, -0.8].flatMap((x) => [-1.9, -1.4].map((z) => <B key={`${x}:${z}`} p={[x, 0.36, z]} s={[0.07, 0.72, 0.07]} c={colors.wood} />))}
+    </group>
+    {[-1.85, -0.85].map((x) => <group key={x} name="chair">
+      <B p={[x, 0.45, -0.9]} s={[0.4, 0.06, 0.4]} c={colors.wood} />
+      <B p={[x, 0.72, -0.72]} s={[0.4, 0.5, 0.06]} c={colors.cabinet} />
+      {[-0.15, 0.15].flatMap((dx) => [-1.05, -0.75].map((z) => <B key={`${dx}:${z}`} p={[x + dx, 0.22, z]} s={[0.05, 0.44, 0.05]} c={colors.wood} />))}
+    </group>)}
+    <group name="kitchen">
+      <B p={[-0.65, 0.45, 1.95]} s={[2.5, 0.9, 0.6]} c={colors.cabinet} />
+      <B p={[-0.65, 0.92, 1.95]} s={[2.5, 0.06, 0.62]} c={colors.wood} />
+      {[-1.5, -0.7, 0.1].map((x) => <B key={x} p={[x, 0.5, 1.635]} s={[0.25, 0.04, 0.04]} c={colors.metal} />)}
+      <B p={[-1.25, 0.96, 1.95]} s={[0.6, 0.04, 0.4]} c={colors.metal} />
+      <B p={[-1.25, 1.1, 2.12]} s={[0.04, 0.28, 0.04]} c={colors.metal} />
+      <B p={[-1.25, 1.23, 2.04]} s={[0.04, 0.04, 0.2]} c={colors.metal} />
+      <B p={[0, 0.96, 1.95]} s={[0.65, 0.02, 0.45]} c={colors.dark} />
+      {[-0.16, 0.16].flatMap((x) => [1.84, 2.06].map((z) => <mesh key={`${x}:${z}`} position={[x, 0.98, z]} rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.055, 0.08, 16]} /><meshStandardMaterial color={colors.metal} /></mesh>))}
+      <B p={[0, 0.45, 1.63]} s={[0.55, 0.4, 0.02]} c={colors.dark} />
+    </group>
+    <group name="toilet" position={[1.55, 0, 1.75]}>
+      <B p={[0, 0.66, 0.3]} s={[0.55, 0.62, 0.22]} c={colors.ceramic} />
+      <mesh position={[0, 0.23, 0]}><cylinderGeometry args={[0.23, 0.16, 0.46, 20]} /><meshStandardMaterial color={colors.ceramic} /></mesh>
+      <mesh position={[0, 0.49, -0.03]} rotation={[-Math.PI / 2, 0, 0]} scale={[1, 1.3, 1]}><torusGeometry args={[0.23, 0.06, 8, 24]} /><meshStandardMaterial color={colors.ceramic} /></mesh>
+      <B p={[0.15, 0.95, 0.3]} s={[0.09, 0.025, 0.07]} c={colors.metal} />
+    </group>
+    <mesh position={[0, 2.05, 0]}><sphereGeometry args={[0.12, 12, 8]} /><meshStandardMaterial color={colors.lamp} emissive={colors.lamp} emissiveIntensity={1} /></mesh>
+    <pointLight position={[0, 1.95, 0]} color={colors.lamp} intensity={12} distance={7} decay={1.5} />
+  </group>)}</>;
 }
 
 /** Distant hills and a far forest so the horizon never looks empty. */
@@ -444,12 +482,6 @@ export default function World() {
   const onFill = useCallback((x: number, z: number) => {
     const result = fillHole(holesRef.current, treesRef.current, x, z, playerRef.current);
     if (result.player) playerRef.current = result.player;
-    const filledIds = holesRef.current.filter((h) => !result.holes.some((p) => p.id === h.id)).map((h) => h.id);
-    const remaining = tunnelsRef.current.filter((t) => !filledIds.includes(t.shaft));
-    const passage = tunnelsRef.current.find((t) => filledIds.includes(t.shaft) && Math.abs(t.x - playerRef.current.x) < TUNNEL_WIDTH / 2 && Math.abs(t.z - playerRef.current.z) < TUNNEL_WIDTH / 2);
-    if (passage && playerRef.current.y < 0) playerRef.current.buried = { x: playerRef.current.x, z: playerRef.current.z, r: 1, d: -passage.floor };
-    tunnelsRef.current = remaining;
-    setTunnels(remaining);
     holesRef.current = result.holes;
     treesRef.current = result.trees;
     setHoles(result.holes);
@@ -467,7 +499,7 @@ export default function World() {
         for (let remaining = seconds; remaining > 0; remaining -= 1 / 60) playerAdvanceRef.current(Math.min(remaining, 1 / 60));
       },
       ...(previousView ? { view: previousView } : {}),
-      get state() { return { player: { ...playerRef.current }, holes: holesRef.current, tunnels: tunnelsRef.current, trees: treesRef.current.map((tr) => ({ ...treePose(tr, timeRef.current), buried: !!tr.buried })) }; },
+      get state() { return { player: { ...playerRef.current }, holes: holesRef.current, tunnels: tunnelsRef.current, furnishings: tunnelFurnishings(tunnelsRef.current), trees: treesRef.current.map((tr) => ({ ...treePose(tr, timeRef.current), buried: !!tr.buried })) }; },
     };
     return () => { delete window.__game; };
   }, [onDig, onFill, onTunnel]);
@@ -498,6 +530,7 @@ export default function World() {
         <Growth holes={holesRef} trees={treesRef} time={timeRef} advance={advanceRef} />
         <Player onDig={onDig} onFill={onFill} onTunnel={onTunnel} holes={holesRef} tunnels={tunnelsRef} pos={playerRef} advance={playerAdvanceRef} />
         <Holes holes={holes} tunnels={tunnels} />
+        <TunnelFurniture tunnels={tunnels} />
         <PointerLockControls onLock={() => setLocked(true)} onUnlock={() => setLocked(false)} />
         <Ready onReady={() => setReady(true)} />
       </Canvas>
