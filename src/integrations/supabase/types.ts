@@ -32,11 +32,33 @@ export type Database = {
         }
         Relationships: []
       }
+      shared_forest_world: {
+        Row: {
+          id: number
+          revision: number
+          snapshot: Json
+        }
+        Insert: {
+          id: number
+          revision?: number
+          snapshot: Json
+        }
+        Update: {
+          id?: number
+          revision?: number
+          snapshot?: Json
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      commit_shared_forest: {
+        Args: { expected_revision: number; world_snapshot: Json }
+        Returns: boolean
+      }
       read_game_world: { Args: { device_key: string }; Returns: Json }
       write_game_world: {
         Args: { device_key: string; world_snapshot: Json }

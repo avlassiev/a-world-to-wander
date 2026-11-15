@@ -8,6 +8,13 @@
       "when": 1794726822664,
       "tag": "0000_persistent_game_worlds",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794742061289,
+      "tag": "0001_shared_forest_world",
+      "breakpoints": true
     }
   ]
 }

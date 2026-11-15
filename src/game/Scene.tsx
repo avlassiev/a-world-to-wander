@@ -1,9 +1,12 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Environment, Lightformer, PointerLockControls, Sky } from "@react-three/drei";
+import { Environment, Lightformer, Sky } from "@react-three/drei";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { supabase } from "@/integrations/supabase/client";
-import { deviceKey, JOURNAL_KEY, parseSave, readJournal, snapshot } from "./save";
+import { snapshot } from "./save";
+import { applyWorldEdit, sharedSave, type WorldEdit } from "./shared";
+import { Button } from "@/components/ui/button";
+import { Play } from "lucide-react";
 import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, DIG_REACH, step, createTrees, attractTrees, treePose, fillHole, digHole, digTunnel, recoverTrees, TUNNEL_HEIGHT, tunnelWidth, tunnelFurnishings, type Tunnel, type FallingTree, type Body } from "./world";
 
 declare global {
@@ -262,6 +265,7 @@ function Player({ onDig, onFill, onTunnel, holes, tunnels, pos, advance }: { onD
       camera.lookAt(targetX, 0, targetZ);
     };
     const d = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement) return;
       keys.current[e.code] = true;
       if ((e.code === "KeyE" || e.code === "KeyF" || e.code === "KeyT") && !e.repeat) {
         const dir = new THREE.Vector3();
@@ -456,6 +460,30 @@ function Ready({ onReady }: { onReady: () => void }) {
   return null;
 }
 
+function MouseLook({ playing }: { playing: boolean }) {
+  const { camera, gl } = useThree();
+  useEffect(() => {
+    let dragging = false;
+    const down = () => { dragging = true; };
+    const up = () => { dragging = false; };
+    const look = (event: MouseEvent) => {
+      if (!playing || (document.pointerLockElement !== gl.domElement && !dragging)) return;
+      camera.rotation.order = "YXZ";
+      camera.rotation.y -= event.movementX * 0.002;
+      camera.rotation.x = Math.max(-Math.PI / 2 + 0.02, Math.min(Math.PI / 2 - 0.02, camera.rotation.x - event.movementY * 0.002));
+    };
+    gl.domElement.addEventListener("mousedown", down);
+    window.addEventListener("mouseup", up);
+    window.addEventListener("mousemove", look);
+    return () => {
+      gl.domElement.removeEventListener("mousedown", down);
+      window.removeEventListener("mouseup", up);
+      window.removeEventListener("mousemove", look);
+    };
+  }, [camera, gl, playing]);
+  return null;
+}
+
 export default function World() {
   const [ready, setReady] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -470,97 +498,105 @@ export default function World() {
   const advanceRef = useRef<(seconds: number) => void>(() => {});
   const playerRef = useRef<Body>({ x: 0, y: 0, z: 6, vy: 0 });
   const playerAdvanceRef = useRef<(dt: number) => void>(() => {});
-  const saveRef = useRef<() => void>(() => {});
-  holesRef.current = holes;
+  const saveRef = useRef<(edit?: WorldEdit) => void>(() => {});
+  const editsRef = useRef<WorldEdit[]>([]);
+  const connectedRef = useRef(false);
   useEffect(() => {
     let active = true;
-    let timer: ReturnType<typeof setInterval> | undefined;
-    let writing = false;
-    let pending: ReturnType<typeof snapshot> | undefined;
-    const flush = async (key: string) => {
-      if (writing) return;
-      writing = true;
-      while (pending) {
-        const current = pending;
-        pending = undefined;
-        try {
-          const { error } = await supabase.rpc("write_game_world", { device_key: key, world_snapshot: current });
-          if (error) throw error;
-          if (active) setSaveStatus("Мир сохранён");
-        } catch {
-          if (!pending) pending = current;
-          if (active) setSaveStatus("Сохранено в браузере · нет связи с облаком");
-          break;
-        }
-      }
-      writing = false;
+    let busy = false;
+    let revision = 0;
+    let canonical = snapshot([], [], createTrees(), playerRef.current, 0);
+    try {
+      const stored = JSON.parse(localStorage.getItem("forest-shared-player") ?? "null");
+      const parsed = sharedSave(canonical, stored);
+      if (parsed) playerRef.current = parsed.player;
+    } catch { /* Keep the safe spawn. */ }
+    const display = () => {
+      const visible = editsRef.current.reduce(applyWorldEdit, canonical);
+      holesRef.current = visible.holes;
+      tunnelsRef.current = visible.tunnels;
+      treesRef.current = visible.trees;
+      timeRef.current = Math.max(timeRef.current, visible.time);
+      setHoles(visible.holes);
+      setTunnels(visible.tunnels);
+      advanceRef.current(0);
     };
-    const start = async () => {
+    const sync = async () => {
+      if (busy || !active) return;
+      busy = true;
       try {
-        const key = deviceKey(localStorage);
-        const local = readJournal(localStorage);
-        const { data, error } = await supabase.rpc("read_game_world", { device_key: key });
-        const cloud = error ? null : parseSave(data);
-        const saved = local && (!cloud || local.savedAt > cloud.savedAt) ? local : cloud;
-        if (!active) return;
-        if (saved) {
-          holesRef.current = saved.holes;
-          tunnelsRef.current = saved.tunnels;
-          treesRef.current = saved.trees;
-          playerRef.current = saved.player;
-          timeRef.current = saved.time;
-          setHoles(saved.holes);
-          setTunnels(saved.tunnels);
+        for (let attempt = 0; attempt < 5 && active; attempt++) {
+          const { data, error } = await supabase.from("shared_forest_world").select("snapshot,revision").eq("id", 1).maybeSingle();
+          if (error) throw error;
+          if (!active) return;
+          const saved = data ? sharedSave(data.snapshot, playerRef.current) : canonical;
+          if (!saved) throw new Error("Invalid common world");
+          canonical = saved;
+          revision = data?.revision ?? 0;
+          const batch = [...editsRef.current];
+          if (batch.length || !data) {
+            const next = batch.reduce(applyWorldEdit, canonical);
+            next.time = Math.max(next.time, timeRef.current);
+            const { data: accepted, error: failure } = await supabase.rpc("commit_shared_forest", { expected_revision: revision, world_snapshot: next });
+            if (failure) throw failure;
+            if (!accepted) continue;
+            editsRef.current.splice(0, batch.length);
+            canonical = next;
+          }
+          if (active) {
+            display();
+            connectedRef.current = true;
+            setSaveStatus(editsRef.current.length ? "Сохраняем изменения…" : "Общий мир · подключён");
+            setLoaded(true);
+          }
+          if (!editsRef.current.length) break;
         }
-        saveRef.current = () => {
-          const current = snapshot(holesRef.current, tunnelsRef.current, treesRef.current, playerRef.current, timeRef.current);
-          try { localStorage.setItem(JOURNAL_KEY, JSON.stringify(current)); }
-          catch { if (active) setSaveStatus("Не удалось сохранить в браузере"); }
-          pending = current;
-          void flush(key);
-        };
-        setSaveStatus(error ? "Сохранено в браузере · нет связи с облаком" : "Мир сохранён");
-        setLoaded(true);
-        timer = setInterval(() => saveRef.current(), 5000);
       } catch {
-        if (active) { setSaveStatus("Сохранение недоступно · разрешите хранение данных в браузере"); setLoaded(true); }
-      }
+        if (active) setSaveStatus("Нет связи с общим миром · повторяем подключение…");
+      } finally { busy = false; }
     };
+    saveRef.current = (edit) => {
+      try { localStorage.setItem("forest-shared-player", JSON.stringify(playerRef.current)); } catch { /* Cloud world does not depend on local storage. */ }
+      if (edit) editsRef.current.push(edit);
+      void sync();
+    };
+    void sync();
+    const timer = setInterval(() => saveRef.current(), 1500);
     const leave = () => saveRef.current();
-    const hidden = () => { if (document.visibilityState === "hidden") leave(); };
     window.addEventListener("pagehide", leave);
-    document.addEventListener("visibilitychange", hidden);
-    void start();
     return () => {
-      leave(); active = false;
-      if (timer) clearInterval(timer);
+      active = false;
+      clearInterval(timer);
       window.removeEventListener("pagehide", leave);
-      document.removeEventListener("visibilitychange", hidden);
       saveRef.current = () => {};
     };
   }, []);
   const onDig = useCallback((x: number, z: number) => {
-    const next = digHole(holesRef.current, x, z, Date.now() + Math.random());
+    if (!connectedRef.current) return;
+    const id = Date.now() + Math.random();
+    const next = digHole(holesRef.current, x, z, id);
     for (const pit of next) recoverTrees(treesRef.current, pit, timeRef.current);
     holesRef.current = next;
     setHoles(next);
     advanceRef.current(0);
-    saveRef.current();
+    saveRef.current({ kind: "dig", x, z, id, time: timeRef.current, player: { ...playerRef.current } });
   }, []);
   const onTunnel = useCallback((x: number, z: number) => {
+    if (!connectedRef.current) return;
     const next = digTunnel(holesRef.current, tunnelsRef.current, playerRef.current, x, z);
     tunnelsRef.current = next;
     setTunnels(next);
-    saveRef.current();
+    saveRef.current({ kind: "tunnel", x, z, id: 0, time: timeRef.current, player: { ...playerRef.current } });
   }, []);
   const onFill = useCallback((x: number, z: number) => {
+    if (!connectedRef.current) return;
     const result = fillHole(holesRef.current, treesRef.current, x, z, playerRef.current);
     if (result.player) playerRef.current = result.player;
     holesRef.current = result.holes;
     treesRef.current = result.trees;
     setHoles(result.holes);
     advanceRef.current(0);
-    saveRef.current();
+    saveRef.current({ kind: "fill", x, z, id: 0, time: timeRef.current, player: { ...playerRef.current } });
   }, []);
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -579,6 +615,18 @@ export default function World() {
     return () => { delete window.__game; };
   }, [onDig, onFill, onTunnel]);
   const { grass } = useTextures();
+  useEffect(() => {
+    const pause = (event: KeyboardEvent) => {
+      if (event.code === "Escape") setLocked(false);
+    };
+    window.addEventListener("keydown", pause);
+    return () => window.removeEventListener("keydown", pause);
+  }, []);
+  const enter = () => {
+    setLocked(true);
+    const canvas = document.querySelector("canvas");
+    try { void canvas?.requestPointerLock()?.catch(() => {}); } catch { /* Drag-to-look remains available. */ }
+  };
   return (
     <div className="game-root" data-scene-ready={ready ? "" : undefined}>
       {loaded && <Canvas shadows gl={{ stencil: true }} camera={{ fov: 70, near: 0.05, far: 600 }}>
@@ -606,15 +654,14 @@ export default function World() {
         <Player onDig={onDig} onFill={onFill} onTunnel={onTunnel} holes={holesRef} tunnels={tunnelsRef} pos={playerRef} advance={playerAdvanceRef} />
         <Holes holes={holes} tunnels={tunnels} />
         <TunnelFurniture tunnels={tunnels} />
-        <PointerLockControls onLock={() => setLocked(true)} onUnlock={() => setLocked(false)} />
+        <MouseLook playing={locked} />
         <Ready onReady={() => setReady(true)} />
       </Canvas>}
       {!locked && (
         <div className="game-overlay">
           <h1>Домик в лесу</h1>
           <p role="status">{saveStatus}</p>
-          <p>Нажмите, чтобы войти в мир</p>
-          <p className="hint">W A S D — ходить · мышь — смотреть · E — копать · T — туннель · F — закапывать · пробел — прыжок · Esc — пауза</p>
+          <Button onClick={enter} disabled={!ready}><Play />Войти в мир</Button>
         </div>
       )}
       {locked && <div className="game-crosshair" />}
