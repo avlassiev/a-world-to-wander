@@ -54,8 +54,8 @@ export function growth(time: number, birth: number, span = GROW_SECONDS) {
 
 export type FallingTree = {
   x: number; z: number; s: number; birth: number;
-  buried?: boolean;
-  fall?: { hole: HoleShape & { id: number }; started: number };
+  buried?: boolean | undefined;
+  fall?: { hole: HoleShape & { id: number }; started: number } | undefined;
 };
 export const TREE_FALL_SECONDS = 2;
 export function createTrees(): FallingTree[] {
@@ -108,7 +108,7 @@ export function canDig(x: number, z: number) {
 // ---- Deep holes & vertical movement ----
 export type HoleShape = { x: number; z: number; r: number; d: number };
 export type Pit = HoleShape & { id: number };
-export type Tunnel = { x: number; z: number; floor: number; shaft: number; room?: boolean };
+export type Tunnel = { x: number; z: number; floor: number; shaft: number; room?: boolean | undefined };
 export const TUNNEL_WIDTH = 2;
 export const ROOM_WIDTH = 4.8;
 export const tunnelWidth = (t: Tunnel) => t.room ? ROOM_WIDTH : TUNNEL_WIDTH;
@@ -188,7 +188,7 @@ export const GRAVITY = 20;
 export const JUMP = 5.5; // normal hop
 /** Jump from a hole bottom: just enough to clear the rim at any depth. */
 export const climbFor = (d: number) => Math.sqrt(2 * GRAVITY * (d + 0.6));
-export type Body = { x: number; y: number; z: number; vy: number; buried?: HoleShape };
+export type Body = { x: number; y: number; z: number; vy: number; buried?: HoleShape | undefined };
 
 export function holeAt<H extends HoleShape>(holes: H[], x: number, z: number): H | undefined {
   return holes.find((h) => h.r > RADIUS && Math.hypot(x - h.x, z - h.z) < h.r - RADIUS * 0.5);

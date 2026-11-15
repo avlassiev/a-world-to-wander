@@ -2,6 +2,8 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, Lightformer, PointerLockControls, Sky } from "@react-three/drei";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import { supabase } from "@/integrations/supabase/client";
+import { deviceKey, JOURNAL_KEY, parseSave, readJournal, snapshot } from "./save";
 import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, DIG_REACH, step, createTrees, attractTrees, treePose, fillHole, digHole, digTunnel, recoverTrees, TUNNEL_HEIGHT, tunnelWidth, tunnelFurnishings, type Tunnel, type FallingTree, type Body } from "./world";
 
 declare global {
@@ -252,8 +254,8 @@ function Player({ onDig, onFill, onTunnel, holes, tunnels, pos, advance }: { onD
   const lantern = useRef<THREE.PointLight>(null);
   const { wood } = useTextures();
   useEffect(() => {
-    camera.position.set(0, EYE, 6);
-    camera.lookAt(0, EYE, -8);
+    camera.position.set(pos.current.x, pos.current.y + EYE, pos.current.z);
+    camera.lookAt(pos.current.x, pos.current.y + EYE, pos.current.z - 14);
     if (import.meta.env.DEV && window.__game) window.__game.view = (x, z, targetX, targetZ) => {
       pos.current = { x, y: 0, z, vy: 0 };
       camera.position.set(x, EYE, z);
@@ -456,6 +458,8 @@ function Ready({ onReady }: { onReady: () => void }) {
 
 export default function World() {
   const [ready, setReady] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [saveStatus, setSaveStatus] = useState("Загрузка мира…");
   const [locked, setLocked] = useState(false);
   const [holes, setHoles] = useState<Hole[]>([]);
   const holesRef = useRef<Hole[]>([]);
@@ -466,18 +470,88 @@ export default function World() {
   const advanceRef = useRef<(seconds: number) => void>(() => {});
   const playerRef = useRef<Body>({ x: 0, y: 0, z: 6, vy: 0 });
   const playerAdvanceRef = useRef<(dt: number) => void>(() => {});
+  const saveRef = useRef<() => void>(() => {});
   holesRef.current = holes;
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    let writing = false;
+    let pending: ReturnType<typeof snapshot> | undefined;
+    const flush = async (key: string) => {
+      if (writing) return;
+      writing = true;
+      while (pending) {
+        const current = pending;
+        pending = undefined;
+        try {
+          const { error } = await supabase.rpc("write_game_world", { device_key: key, world_snapshot: current });
+          if (error) throw error;
+          if (active) setSaveStatus("Мир сохранён");
+        } catch {
+          if (!pending) pending = current;
+          if (active) setSaveStatus("Сохранено в браузере · нет связи с облаком");
+          break;
+        }
+      }
+      writing = false;
+    };
+    const start = async () => {
+      try {
+        const key = deviceKey(localStorage);
+        const local = readJournal(localStorage);
+        const { data, error } = await supabase.rpc("read_game_world", { device_key: key });
+        const cloud = error ? null : parseSave(data);
+        const saved = local && (!cloud || local.savedAt > cloud.savedAt) ? local : cloud;
+        if (!active) return;
+        if (saved) {
+          holesRef.current = saved.holes;
+          tunnelsRef.current = saved.tunnels;
+          treesRef.current = saved.trees;
+          playerRef.current = saved.player;
+          timeRef.current = saved.time;
+          setHoles(saved.holes);
+          setTunnels(saved.tunnels);
+        }
+        saveRef.current = () => {
+          const current = snapshot(holesRef.current, tunnelsRef.current, treesRef.current, playerRef.current, timeRef.current);
+          try { localStorage.setItem(JOURNAL_KEY, JSON.stringify(current)); }
+          catch { if (active) setSaveStatus("Не удалось сохранить в браузере"); }
+          pending = current;
+          void flush(key);
+        };
+        setSaveStatus(error ? "Сохранено в браузере · нет связи с облаком" : "Мир сохранён");
+        setLoaded(true);
+        timer = setInterval(() => saveRef.current(), 5000);
+      } catch {
+        if (active) { setSaveStatus("Сохранение недоступно · разрешите хранение данных в браузере"); setLoaded(true); }
+      }
+    };
+    const leave = () => saveRef.current();
+    const hidden = () => { if (document.visibilityState === "hidden") leave(); };
+    window.addEventListener("pagehide", leave);
+    document.addEventListener("visibilitychange", hidden);
+    void start();
+    return () => {
+      leave(); active = false;
+      if (timer) clearInterval(timer);
+      window.removeEventListener("pagehide", leave);
+      document.removeEventListener("visibilitychange", hidden);
+      saveRef.current = () => {};
+    };
+  }, []);
   const onDig = useCallback((x: number, z: number) => {
     const next = digHole(holesRef.current, x, z, Date.now() + Math.random());
     for (const pit of next) recoverTrees(treesRef.current, pit, timeRef.current);
     holesRef.current = next;
     setHoles(next);
     advanceRef.current(0);
+    saveRef.current();
   }, []);
   const onTunnel = useCallback((x: number, z: number) => {
     const next = digTunnel(holesRef.current, tunnelsRef.current, playerRef.current, x, z);
     tunnelsRef.current = next;
     setTunnels(next);
+    saveRef.current();
   }, []);
   const onFill = useCallback((x: number, z: number) => {
     const result = fillHole(holesRef.current, treesRef.current, x, z, playerRef.current);
@@ -486,6 +560,7 @@ export default function World() {
     treesRef.current = result.trees;
     setHoles(result.holes);
     advanceRef.current(0);
+    saveRef.current();
   }, []);
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -506,7 +581,7 @@ export default function World() {
   const { grass } = useTextures();
   return (
     <div className="game-root" data-scene-ready={ready ? "" : undefined}>
-      <Canvas shadows gl={{ stencil: true }} camera={{ fov: 70, near: 0.05, far: 600 }}>
+      {loaded && <Canvas shadows gl={{ stencil: true }} camera={{ fov: 70, near: 0.05, far: 600 }}>
         <Sky sunPosition={[30, 20, 10]} turbidity={4} />
         <fog attach="fog" args={["#cfe3ec", 60, 260]} />
         <hemisphereLight args={["#dff1ff", "#5a6b3a", 0.6]} />
@@ -533,10 +608,11 @@ export default function World() {
         <TunnelFurniture tunnels={tunnels} />
         <PointerLockControls onLock={() => setLocked(true)} onUnlock={() => setLocked(false)} />
         <Ready onReady={() => setReady(true)} />
-      </Canvas>
+      </Canvas>}
       {!locked && (
         <div className="game-overlay">
           <h1>Домик в лесу</h1>
+          <p role="status">{saveStatus}</p>
           <p>Нажмите, чтобы войти в мир</p>
           <p className="hint">W A S D — ходить · мышь — смотреть · E — копать · T — туннель · F — закапывать · пробел — прыжок · Esc — пауза</p>
         </div>
