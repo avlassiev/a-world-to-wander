@@ -73,6 +73,10 @@
 }
 
 :root {
+  --game-play: oklch(0.73 0.17 145);
+  --game-play-hover: oklch(0.8 0.17 145);
+  --game-play-foreground: oklch(0.2 0.04 145);
+  --game-play-shadow: 0 8px 24px oklch(0.15 0.03 145 / 0.3);
   --game-tunnel-wood: #b5804f;
   --game-tunnel-cabinet: #3f6e8c;
   --game-tunnel-metal: #b8c2c8;
@@ -171,3 +175,6 @@
 .game-crosshair { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px; border-radius: 9999px; background: oklch(1 0 0 / 0.8); pointer-events: none; }
 .game-overlay { padding: 16px; overflow-y: auto; }
 .game-overlay h1 { text-align: center; font-size: 2.5rem; }
+.game-play { width: 128px; height: 128px; margin-top: 20px; border-radius: 50%; background: var(--game-play); color: var(--game-play-foreground); box-shadow: var(--game-play-shadow); }
+.game-play:hover { background: var(--game-play-hover); }
+.game-play svg { width: 60px; height: 60px; fill: currentColor; margin-left: 6px; }

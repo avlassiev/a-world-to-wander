@@ -660,8 +660,8 @@ export default function World() {
       {!locked && (
         <div className="game-overlay">
           <h1>Домик в лесу</h1>
-          <p role="status">{saveStatus}</p>
-          <Button onClick={enter} disabled={!ready}><Play />Войти в мир</Button>
+          <p role="status" className="sr-only">{saveStatus}</p>
+          <Button className="game-play" onClick={enter} disabled={!ready} aria-label="Начать игру" title="Начать игру"><Play aria-hidden="true" /></Button>
         </div>
       )}
       {locked && <div className="game-crosshair" />}
