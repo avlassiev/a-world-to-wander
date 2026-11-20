@@ -505,6 +505,7 @@ export default function World() {
     let active = true;
     let busy = false;
     let revision = 0;
+    let seenRevision = -1;
     let canonical = snapshot([], [], createTrees(), playerRef.current, 0);
     try {
       const stored = JSON.parse(localStorage.getItem("forest-shared-player") ?? "null");
@@ -513,12 +514,10 @@ export default function World() {
     } catch { /* Keep the safe spawn. */ }
     const display = () => {
       const visible = editsRef.current.reduce(applyWorldEdit, canonical);
-      holesRef.current = visible.holes;
-      tunnelsRef.current = visible.tunnels;
+      if (visible.holes !== holesRef.current) { holesRef.current = visible.holes; setHoles(visible.holes); }
+      if (visible.tunnels !== tunnelsRef.current) { tunnelsRef.current = visible.tunnels; setTunnels(visible.tunnels); }
       treesRef.current = visible.trees;
       timeRef.current = Math.max(timeRef.current, visible.time);
-      setHoles(visible.holes);
-      setTunnels(visible.tunnels);
       advanceRef.current(0);
     };
     const sync = async () => {
@@ -529,11 +528,14 @@ export default function World() {
           const { data, error } = await supabase.from("shared_forest_world").select("snapshot,revision").eq("id", 1).maybeSingle();
           if (error) throw error;
           if (!active) return;
+          revision = data?.revision ?? 0;
+          const batch = [...editsRef.current];
+          // Nothing new from other players and nothing of ours to save: skip the redraw so walking stays smooth.
+          if (data && revision === seenRevision && batch.length === 0) break;
           const saved = data ? sharedSave(data.snapshot, playerRef.current) : canonical;
           if (!saved) throw new Error("Invalid common world");
           canonical = saved;
-          revision = data?.revision ?? 0;
-          const batch = [...editsRef.current];
+          seenRevision = revision;
           if (batch.length || !data) {
             const next = batch.reduce(applyWorldEdit, canonical);
             next.time = Math.max(next.time, timeRef.current);
@@ -542,6 +544,7 @@ export default function World() {
             if (!accepted) continue;
             editsRef.current.splice(0, batch.length);
             canonical = next;
+            seenRevision = revision + 1;
           }
           if (active) {
             display();
