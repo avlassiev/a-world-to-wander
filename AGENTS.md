@@ -41,3 +41,4 @@ use the editor.
 - Old capability-scoped private saves remain inaccessible to visitors; shared initialization backfills the latest prior world once. Why: preserves existing excavation without exposing private save access.
 - Player position is journaled locally while shared excavation is loaded before Canvas. Why: reopening does not move every player to another player's location.
 - Mouse look supports pointer lock and canvas dragging after entering the world. Why: embedded previews can deny pointer lock.
+- Multiplayer uses one public Realtime presence/broadcast room per active game, ephemeral UUIDs and validated sequenced poses; ref-held avatars interpolate without rerendering terrain. Why: players see walking and turning without putting movement in persistent world snapshots or hitching the scene.

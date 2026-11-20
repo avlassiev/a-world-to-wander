@@ -7,6 +7,8 @@ import { snapshot } from "./save";
 import { applyWorldEdit, sharedSave, type WorldEdit } from "./shared";
 import { Button } from "@/components/ui/button";
 import { Play } from "lucide-react";
+import { Multiplayer } from "./Multiplayer";
+import { type Peer } from "./multiplayer";
 import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, DIG_REACH, step, createTrees, attractTrees, treePose, fillHole, digHole, digTunnel, recoverTrees, TUNNEL_HEIGHT, tunnelWidth, tunnelFurnishings, type Tunnel, type FallingTree, type Body } from "./world";
 
 declare global {
@@ -17,7 +19,8 @@ declare global {
       tunnel: (dirX: number, dirZ: number) => void;
       sim: (seconds: number) => void;
       view?: (x: number, z: number, targetX: number, targetZ: number) => void;
-      readonly state: { player: Body; holes: Hole[]; tunnels: Tunnel[]; furnishings: ReturnType<typeof tunnelFurnishings>; trees: (ReturnType<typeof treePose> & { buried: boolean })[] };
+      avatars?: () => unknown[];
+      readonly state: { player: Body; players: Peer["pose"][]; holes: Hole[]; tunnels: Tunnel[]; furnishings: ReturnType<typeof tunnelFurnishings>; trees: (ReturnType<typeof treePose> & { buried: boolean })[] };
     };
   }
 }
@@ -497,6 +500,7 @@ export default function World() {
   const timeRef = useRef(0);
   const advanceRef = useRef<(seconds: number) => void>(() => {});
   const playerRef = useRef<Body>({ x: 0, y: 0, z: 6, vy: 0 });
+  const peersRef = useRef(new Map<string, Peer>());
   const playerAdvanceRef = useRef<(dt: number) => void>(() => {});
   const saveRef = useRef<(edit?: WorldEdit) => void>(() => {});
   const editsRef = useRef<WorldEdit[]>([]);
@@ -613,7 +617,7 @@ export default function World() {
         for (let remaining = seconds; remaining > 0; remaining -= 1 / 60) playerAdvanceRef.current(Math.min(remaining, 1 / 60));
       },
       ...(previousView ? { view: previousView } : {}),
-      get state() { return { player: { ...playerRef.current }, holes: holesRef.current, tunnels: tunnelsRef.current, furnishings: tunnelFurnishings(tunnelsRef.current), trees: treesRef.current.map((tr) => ({ ...treePose(tr, timeRef.current), buried: !!tr.buried })) }; },
+      get state() { return { player: { ...playerRef.current }, players: [...peersRef.current.values()].map((peer) => peer.pose), holes: holesRef.current, tunnels: tunnelsRef.current, furnishings: tunnelFurnishings(tunnelsRef.current), trees: treesRef.current.map((tr) => ({ ...treePose(tr, timeRef.current), buried: !!tr.buried })) }; },
     };
     return () => { delete window.__game; };
   }, [onDig, onFill, onTunnel]);
@@ -658,6 +662,7 @@ export default function World() {
         <Holes holes={holes} tunnels={tunnels} />
         <TunnelFurniture tunnels={tunnels} />
         <MouseLook playing={locked} />
+        <Multiplayer playing={locked} pos={playerRef} peers={peersRef} />
         <Ready onReady={() => setReady(true)} />
       </Canvas>}
       {!locked && (

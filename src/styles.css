@@ -73,6 +73,11 @@
 }
 
 :root {
+  --game-player-shirt: #e45e55;
+  --game-player-skin: #efc394;
+  --game-player-trousers: #385b78;
+  --game-player-boots: #30383c;
+  --game-player-eyes: #232c30;
   --game-play: oklch(0.73 0.17 145);
   --game-play-hover: oklch(0.8 0.17 145);
   --game-play-foreground: oklch(0.2 0.04 145);
