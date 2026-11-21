@@ -55,19 +55,26 @@ export function growth(time: number, birth: number, span = GROW_SECONDS) {
 export type FallingTree = {
   x: number; z: number; s: number; birth: number;
   buried?: boolean | undefined;
+  destroyed?: boolean | undefined;
+  explosion?: { x: number; y: number; z: number; time: number } | undefined;
   fall?: { hole: HoleShape & { id: number }; started: number } | undefined;
 };
 export const TREE_FALL_SECONDS = 2;
 export function createTrees(): FallingTree[] {
-  return Array.from({ length: 40 }, (_, i) => {
+  const nearby = Array.from({ length: 40 }, (_, i) => {
     const a = i * 2.4, rr = 14 + ((i * 7) % 20);
     return { x: Math.cos(a) * rr, z: Math.sin(a) * rr, s: 0.8 + ((i * 13) % 6) / 10, birth: i < 20 ? -100 : (i - 20) * 6 };
   });
+  const distant = Array.from({ length: 70 }, (_, i) => {
+    const a = i * 2.399, rr = 55 + ((i * 29) % 200);
+    return { x: Math.cos(a) * rr, z: Math.sin(a) * rr, s: 0.9 + ((i * 7) % 8) / 10, birth: -100 };
+  });
+  return [...nearby, ...distant];
 }
 
 /** New holes pull nearby trees in, or the nearest tree when dug away from the forest. */
 export function attractTrees(trees: FallingTree[], hole: HoleShape & { id: number }, time: number, isNew: boolean) {
-  const standing = trees.filter((tr) => !tr.buried && !tr.fall && tr.birth <= time);
+  const standing = trees.filter((tr) => !tr.buried && !tr.destroyed && !tr.fall && tr.birth <= time);
   const distance = (tr: FallingTree) => Math.hypot(tr.x - hole.x, tr.z - hole.z);
   const nearby = standing.filter((tr) => distance(tr) <= hole.r + (isNew ? 3 : 0.2));
   if (isNew && nearby.length === 0) {
@@ -92,6 +99,37 @@ export function treePose(tr: FallingTree, time: number) {
     tilt: Math.sin(p * Math.PI) * 0.65,
     heading: Math.atan2(fall.hole.x - tr.x, fall.hole.z - tr.z),
   };
+}
+export const TREE_BLAST_REACH = 4;
+export const TREE_BLAST_SECONDS = 1.2;
+
+/** Select only the nearest visible tree in front of the player, never one behind them. */
+export function treeAhead(trees: FallingTree[], player: Body, dirX: number, dirZ: number, time: number) {
+  const length = Math.hypot(dirX, dirZ);
+  if (length < 0.01 || player.buried) return -1;
+  let closest = TREE_BLAST_REACH;
+  let selected = -1;
+  trees.forEach((tr, index) => {
+    if (tr.destroyed || tr.buried || tr.birth > time) return;
+    const pose = treePose(tr, time);
+    const dx = pose.x - player.x, dz = pose.z - player.z;
+    const distance = Math.hypot(dx, dz);
+    const forward = (dx * dirX + dz * dirZ) / length;
+    const sideways = Math.abs(dx * dirZ - dz * dirX) / length;
+    if (distance <= closest && forward >= 0 && sideways <= 1.1 * tr.s && Math.abs(pose.y - player.y) < 2) {
+      closest = distance;
+      selected = index;
+    }
+  });
+  return selected;
+}
+
+/** Destruction is permanent and idempotent, including when a shared edit is replayed. */
+export function explodeTree(trees: FallingTree[], index: number, time: number): FallingTree[] {
+  const tree = trees[index];
+  if (!tree || tree.destroyed || tree.buried) return trees;
+  const pose = treePose(tree, time);
+  return trees.map((tr, i) => i === index ? { ...tr, destroyed: true, explosion: { x: pose.x, y: pose.y, z: pose.z, time } } : tr);
 }
 export function inPond(x: number, z: number, pad = 0) {
   return ponds.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + pad);
@@ -154,7 +192,7 @@ export function digTunnel(holes: Pit[], tunnels: Tunnel[], player: Body, dirX: n
 export function recoverTrees(trees: FallingTree[], pit: Pit, time: number) {
   for (const tr of trees) {
     const old = tr.fall?.hole;
-    if (tr.buried && old && Math.hypot(old.x - pit.x, old.z - pit.z) < pit.r && pit.d >= old.d) {
+    if (!tr.destroyed && tr.buried && old && Math.hypot(old.x - pit.x, old.z - pit.z) < pit.r && pit.d >= old.d) {
       tr.buried = false;
       tr.fall = { hole: pit, started: time - TREE_FALL_SECONDS };
     }

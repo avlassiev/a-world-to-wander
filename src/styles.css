@@ -73,6 +73,9 @@
 }
 
 :root {
+  --game-blast-leaves: #438947;
+  --game-blast-wood: #996641;
+  --game-blast-flash: #ffe68a;
   --game-player-shirt: #e45e55;
   --game-player-skin: #efc394;
   --game-player-trousers: #385b78;

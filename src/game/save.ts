@@ -8,7 +8,7 @@ export const saveSchema = z.object({
   version: z.literal(1), savedAt: number, time: number.nonnegative(),
   holes: z.array(pit).max(150),
   tunnels: z.array(z.object({ x: number, z: number, floor: number, shaft: number, room: z.boolean().optional() })),
-  trees: z.array(z.object({ x: number, z: number, s: number, birth: number, buried: z.boolean().optional(), fall: z.object({ hole: pit, started: number }).optional() })),
+  trees: z.array(z.object({ x: number, z: number, s: number, birth: number, buried: z.boolean().optional(), destroyed: z.boolean().optional(), explosion: z.object({ x: number, y: number, z: number, time: number }).optional(), fall: z.object({ hole: pit, started: number }).optional() })),
   player: z.object({ x: number, y: number, z: number, vy: number, buried: shape.optional() }),
 });
 export type WorldSave = z.infer<typeof saveSchema>;

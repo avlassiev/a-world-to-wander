@@ -5,6 +5,23 @@ import { createTrees, tunnelFurnishings } from "./world";
 const player = { x: 0, y: 0, z: 6, vy: 0 };
 const edit = (x: number, id: number): WorldEdit => ({ kind: "dig", x, z: 50, id, time: 10, player });
 describe("common forest", () => {
+  it("makes the 70 already visible distant trees destructible in older 40-tree saves", () => {
+    const old = snapshot([], [], createTrees().slice(0, 40), player, 0);
+    const upgraded = sharedSave(old, player);
+    expect(upgraded?.trees).toHaveLength(110);
+    expect(upgraded?.trees[40]).toMatchObject({ x: 55, z: 0, birth: -100 });
+    expect(old.trees).toHaveLength(40);
+  });
+  it("keeps an exploded tree destroyed on another computer and after a conflicting dig", () => {
+    const base = snapshot([], [], createTrees(), player, 0);
+    const blasted = applyWorldEdit(base, { kind: "blast", x: 0, z: -1, id: 0, time: 10, player });
+    const next = applyWorldEdit(blasted, edit(50, 1));
+    const loaded = sharedSave(JSON.parse(JSON.stringify(next)), player);
+    expect(loaded?.trees[0]?.destroyed).toBe(true);
+    expect(loaded?.trees[0]?.explosion?.time).toBe(10);
+    expect(loaded?.trees[1]?.destroyed).toBeUndefined();
+    expect(base.trees[0]?.destroyed).toBeUndefined();
+  });
   it("keeps both computers' digs when a conflicting edit is replayed", () => {
     const base = snapshot([], [], createTrees(), player, 0);
     const first = applyWorldEdit(base, edit(50, 1));

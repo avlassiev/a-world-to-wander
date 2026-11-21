@@ -1,7 +1,35 @@
 import { describe, expect, it } from "vitest";
-import { HOLE_START_D, HOLE_MAX_D, step, attractTrees, treePose, fillHole, digHole, digTunnel, tunnelFurnishings, recoverTrees, TREE_FALL_SECONDS, type FallingTree, type Body } from "./world";
+import { HOLE_START_D, HOLE_MAX_D, step, attractTrees, treePose, treeAhead, explodeTree, fillHole, digHole, digTunnel, tunnelFurnishings, recoverTrees, TREE_FALL_SECONDS, type FallingTree, type Body } from "./world";
 
 const hole = [{ x: 0, z: 10, r: 1, d: HOLE_START_D }];
+describe("T in front of a tree", () => {
+  const player = { x: 20, y: 0, z: 20, vy: 0 };
+  const trees: FallingTree[] = [{ x: 20, z: 18, s: 1, birth: -100 }, { x: 20, z: 22, s: 1, birth: -100 }];
+  it("explodes only the tree ahead, leaving the tree behind intact", () => {
+    const index = treeAhead(trees, player, 0, -1, 10);
+    expect(index).toBe(0);
+    const result = explodeTree(trees, index, 10);
+    expect(result[0]?.destroyed).toBe(true);
+    expect(result[0]?.explosion).toEqual({ x: 20, y: 0, z: 18, time: 10 });
+    expect(result[1]?.destroyed).toBeUndefined();
+  });
+  it("allows walking through the exploded tree's former position", () => {
+    const result = explodeTree(trees, 0, 10);
+    expect(result[0]?.destroyed).toBe(true);
+    expect(step(player, 0, -2, false, [], 1 / 60)).toMatchObject({ x: 20, z: 18 });
+  });
+  it("does not target distant or buried trees", () => {
+    expect(treeAhead([{ ...trees[0], x: 20, z: 10, s: 1, birth: -100 }], player, 0, -1, 10)).toBe(-1);
+    expect(treeAhead(trees.map((tr) => ({ ...tr, buried: true })), player, 0, -1, 10)).toBe(-1);
+  });
+  it("does not make an exploded tree fall or resurrect after digging", () => {
+    const result = explodeTree(trees, 0, 10);
+    attractTrees(result, { x: 20, z: 18, r: 1, d: 2, id: 5 }, 12, true);
+    expect(result[0]?.fall).toBeUndefined();
+    expect(treeAhead(result, player, 0, -1, 12)).toBe(-1);
+    expect(explodeTree(result, 0, 12)).toBe(result);
+  });
+});
 const run = (b: Body, n: number, jump = false, dx = 0, dz = 0) => {
   for (let i = 0; i < n; i++) b = step(b, dx, dz, jump && i === 0, hole, 1 / 60);
   return b;

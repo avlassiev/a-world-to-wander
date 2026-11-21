@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Play } from "lucide-react";
 import { Multiplayer } from "./Multiplayer";
 import { type Peer } from "./multiplayer";
-import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, DIG_REACH, step, createTrees, attractTrees, treePose, fillHole, digHole, digTunnel, recoverTrees, TUNNEL_HEIGHT, tunnelWidth, tunnelFurnishings, type Tunnel, type FallingTree, type Body } from "./world";
+import { TreeBursts } from "./TreeBursts";
+import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, DIG_REACH, step, createTrees, attractTrees, treePose, treeAhead, explodeTree, fillHole, digHole, digTunnel, recoverTrees, TUNNEL_HEIGHT, tunnelWidth, tunnelFurnishings, type Tunnel, type FallingTree, type Body } from "./world";
 
 declare global {
   interface Window {
@@ -20,7 +21,7 @@ declare global {
       sim: (seconds: number) => void;
       view?: (x: number, z: number, targetX: number, targetZ: number) => void;
       avatars?: () => unknown[];
-      readonly state: { player: Body; players: Peer["pose"][]; holes: Hole[]; tunnels: Tunnel[]; furnishings: ReturnType<typeof tunnelFurnishings>; trees: (ReturnType<typeof treePose> & { buried: boolean })[] };
+      readonly state: { player: Body; players: Peer["pose"][]; holes: Hole[]; tunnels: Tunnel[]; furnishings: ReturnType<typeof tunnelFurnishings>; trees: (ReturnType<typeof treePose> & { buried: boolean; destroyed: boolean })[] };
     };
   }
 }
@@ -208,7 +209,8 @@ function Growth({ holes, trees, time, advance }: { holes: React.RefObject<Hole[]
   }, []);
   const treeRefs = useRef<(THREE.Group | null)[]>([]);
   const flowerRefs = useRef<(THREE.Group | null)[]>([]);
-  const seen = useRef(new Map<number, string>());
+  // Restored pits have already attracted trees; reopening must not pull a fresh tree into each old pit.
+  const seen = useRef(new Map(holes.current.map((h) => [h.id, `${h.r}:${h.d}`])));
   const tick = useCallback((seconds: number) => {
     for (const h of holes.current) {
       const signature = `${h.r}:${h.d}`;
@@ -222,7 +224,7 @@ function Growth({ holes, trees, time, advance }: { holes: React.RefObject<Hole[]
     trees.current.forEach((tr, i) => {
       const g = treeRefs.current[i];
       if (g) {
-        g.visible = !tr.buried;
+        g.visible = !tr.buried && !tr.destroyed;
         const pose = treePose(tr, t);
         g.position.set(pose.x, pose.y, pose.z);
         g.rotation.set(pose.tilt * Math.cos(pose.heading), 0, -pose.tilt * Math.sin(pose.heading));
@@ -429,16 +431,12 @@ function TunnelFurniture({ tunnels }: { tunnels: Tunnel[] }) {
   </group>)}</>;
 }
 
-/** Distant hills and a far forest so the horizon never looks empty. */
+/** Distant hills; all visible forest trees are interactive Growth trees. */
 function Horizon() {
   const hills = useMemo(() => Array.from({ length: 16 }, (_, i) => {
     const a = (i / 16) * Math.PI * 2 + (i % 3) * 0.13;
     const rr = 300 + ((i * 37) % 120);
     return { x: Math.cos(a) * rr, z: Math.sin(a) * rr, s: 60 + ((i * 23) % 50), h: 14 + ((i * 17) % 12) };
-  }), []);
-  const farTrees = useMemo(() => Array.from({ length: 70 }, (_, i) => {
-    const a = i * 2.399, rr = 55 + ((i * 29) % 200);
-    return { x: Math.cos(a) * rr, z: Math.sin(a) * rr, s: 0.9 + ((i * 7) % 8) / 10 };
   }), []);
   return (
     <>
@@ -447,11 +445,6 @@ function Horizon() {
           <coneGeometry args={[hl.s, hl.h, 7]} />
           <meshStandardMaterial color={i % 2 ? "#4e7c33" : "#5f8f3e"} flatShading />
         </mesh>
-      ))}
-      {farTrees.map((t, i) => (
-        <group key={`t${i}`} position={[t.x, 0, t.z]} scale={t.s}>
-          <Tree />
-        </group>
       ))}
     </>
   );
@@ -590,6 +583,14 @@ export default function World() {
   }, []);
   const onTunnel = useCallback((x: number, z: number) => {
     if (!connectedRef.current) return;
+    if (playerRef.current.y >= -0.05) {
+      const index = treeAhead(treesRef.current, playerRef.current, x, z, timeRef.current);
+      if (index < 0) return;
+      treesRef.current = explodeTree(treesRef.current, index, timeRef.current);
+      advanceRef.current(0);
+      saveRef.current({ kind: "blast", x, z, id: index, time: timeRef.current, player: { ...playerRef.current } });
+      return;
+    }
     const next = digTunnel(holesRef.current, tunnelsRef.current, playerRef.current, x, z);
     tunnelsRef.current = next;
     setTunnels(next);
@@ -617,7 +618,7 @@ export default function World() {
         for (let remaining = seconds; remaining > 0; remaining -= 1 / 60) playerAdvanceRef.current(Math.min(remaining, 1 / 60));
       },
       ...(previousView ? { view: previousView } : {}),
-      get state() { return { player: { ...playerRef.current }, players: [...peersRef.current.values()].map((peer) => peer.pose), holes: holesRef.current, tunnels: tunnelsRef.current, furnishings: tunnelFurnishings(tunnelsRef.current), trees: treesRef.current.map((tr) => ({ ...treePose(tr, timeRef.current), buried: !!tr.buried })) }; },
+      get state() { return { player: { ...playerRef.current }, players: [...peersRef.current.values()].map((peer) => peer.pose), holes: holesRef.current, tunnels: tunnelsRef.current, furnishings: tunnelFurnishings(tunnelsRef.current), trees: treesRef.current.map((tr) => ({ ...treePose(tr, timeRef.current), buried: !!tr.buried, destroyed: !!tr.destroyed })) }; },
     };
     return () => { delete window.__game; };
   }, [onDig, onFill, onTunnel]);
@@ -658,6 +659,7 @@ export default function World() {
         <Ponds />
         <Horizon />
         <Growth holes={holesRef} trees={treesRef} time={timeRef} advance={advanceRef} />
+        <TreeBursts trees={treesRef} time={timeRef} />
         <Player onDig={onDig} onFill={onFill} onTunnel={onTunnel} holes={holesRef} tunnels={tunnelsRef} pos={playerRef} advance={playerAdvanceRef} />
         <Holes holes={holes} tunnels={tunnels} />
         <TunnelFurniture tunnels={tunnels} />
