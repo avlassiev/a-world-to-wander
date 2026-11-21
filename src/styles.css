@@ -73,6 +73,12 @@
 }
 
 :root {
+  --game-sky-day: #b9deef;
+  --game-sky-dusk: #c88c8a;
+  --game-sky-night: #121c32;
+  --game-sun: #ffe7a2;
+  --game-moon: #d5e5ff;
+  --game-light-ground: #5a6b3a;
   --game-timber-end: #dfbd7c;
   --game-tool-background: oklch(0.96 0.02 100);
   --game-tool-foreground: oklch(0.25 0.02 145);

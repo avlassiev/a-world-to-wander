@@ -1,5 +1,4 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Environment, Lightformer, Sky } from "@react-three/drei";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { supabase } from "@/integrations/supabase/client";
@@ -12,6 +11,7 @@ import { type Peer } from "./multiplayer";
 import { TreeBursts } from "./TreeBursts";
 import { Timber } from "./Timber";
 import { TimberControls } from "./TimberControls";
+import { DayNight } from "./DayNight";
 import { CUT_SECONDS, carriedTree, cutTree, nearbyTimber, pickTimber, dropTimber, timberOwner } from "./timber";
 import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, DIG_REACH, step, createTrees, attractTrees, treePose, treeAhead, explodeTree, fillHole, digHole, digTunnel, recoverTrees, TUNNEL_HEIGHT, tunnelWidth, tunnelFurnishings, type Tunnel, type FallingTree, type Body } from "./world";
 
@@ -22,6 +22,7 @@ declare global {
       fill: (x: number, z: number) => void;
       tunnel: (dirX: number, dirZ: number) => void;
       sim: (seconds: number) => void;
+      sky: (seconds: number | null) => void;
       view?: (x: number, z: number, targetX: number, targetZ: number) => void;
       avatars?: () => unknown[];
       readonly state: { player: Body; carrying: number; players: Peer["pose"][]; holes: Hole[]; tunnels: Tunnel[]; furnishings: ReturnType<typeof tunnelFurnishings>; trees: (ReturnType<typeof treePose> & { buried: boolean; destroyed: boolean; cut: boolean; timber: FallingTree["timber"] })[] };
@@ -505,6 +506,7 @@ export default function World() {
   const tunnelsRef = useRef<Tunnel[]>([]);
   const treesRef = useRef(createTrees());
   const timeRef = useRef(0);
+  const skyOverrideRef = useRef<number | null>(null);
   const advanceRef = useRef<(seconds: number) => void>(() => {});
   const playerRef = useRef<Body>({ x: 0, y: 0, z: 6, vy: 0 });
   const directionRef = useRef({ x: 0, z: -1 });
@@ -651,6 +653,7 @@ export default function World() {
       dig: onDig,
       fill: onFill,
       tunnel: onTunnel,
+      sky: (seconds) => { skyOverrideRef.current = seconds; },
       sim: (seconds) => {
         advanceRef.current(seconds);
         for (let remaining = seconds; remaining > 0; remaining -= 1 / 60) playerAdvanceRef.current(Math.min(remaining, 1 / 60));
@@ -683,15 +686,7 @@ export default function World() {
   return (
     <div className="game-root" data-scene-ready={ready ? "" : undefined}>
       {loaded && <Canvas shadows gl={{ stencil: true }} camera={{ fov: 70, near: 0.05, far: 600 }}>
-        <Sky sunPosition={[30, 20, 10]} turbidity={4} />
-        <fog attach="fog" args={["#cfe3ec", 60, 260]} />
-        <hemisphereLight args={["#dff1ff", "#5a6b3a", 0.6]} />
-        <directionalLight position={[30, 25, 10]} intensity={2.2} castShadow shadow-mapSize={[2048, 2048]}
-          shadow-camera-left={-30} shadow-camera-right={30} shadow-camera-top={30} shadow-camera-bottom={-30} />
-        <Environment>
-          <Lightformer intensity={2} position={[0, 5, 0]} scale={[10, 10, 1]} />
-          <Lightformer intensity={1} color="#bcd" position={[-5, 1, -1]} rotation-y={Math.PI / 2} scale={[20, 1, 1]} />
-        </Environment>
+        <DayNight override={skyOverrideRef} />
         <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[1200, 1200]} />
           <meshStandardMaterial map={grass} stencilWrite stencilRef={1} stencilWriteMask={0} stencilFunc={THREE.NotEqualStencilFunc} />
