@@ -294,8 +294,10 @@ function Player({ onDig, onFill, onTunnel, onSaw, onCarry, direction, holes, tun
       }
     };
     const u = (e: KeyboardEvent) => (keys.current[e.code] = false);
-    window.addEventListener("keydown", d); window.addEventListener("keyup", u);
-    return () => { window.removeEventListener("keydown", d); window.removeEventListener("keyup", u); };
+    const reset = () => { keys.current = {}; };
+    window.addEventListener("keydown", d); window.addEventListener("keyup", u); window.addEventListener("blur", reset);
+    document.addEventListener("pointerlockchange", reset);
+    return () => { window.removeEventListener("keydown", d); window.removeEventListener("keyup", u); window.removeEventListener("blur", reset); document.removeEventListener("pointerlockchange", reset); };
   }, [camera, onDig, onFill, onTunnel, onSaw, onCarry, holes, pos]);
   const f = new THREE.Vector3(), r = new THREE.Vector3();
   const tick = (dt: number) => {
@@ -467,7 +469,12 @@ function MouseLook({ playing }: { playing: boolean }) {
   const { camera, gl } = useThree();
   useEffect(() => {
     let dragging = false;
-    const down = () => { dragging = true; };
+    const down = () => {
+      dragging = true;
+      if (playing && document.pointerLockElement !== gl.domElement) {
+        try { void gl.domElement.requestPointerLock()?.catch(() => {}); } catch { /* Drag-to-look remains available. */ }
+      }
+    };
     const up = () => { dragging = false; };
     const look = (event: MouseEvent) => {
       if (!playing || (document.pointerLockElement !== gl.domElement && !dragging)) return;
@@ -658,8 +665,15 @@ export default function World() {
     const pause = (event: KeyboardEvent) => {
       if (event.code === "Escape") setLocked(false);
     };
+    // Browsers swallow Escape while pointer lock is active; show the play button again when lock is lost.
+    let hadLock = false;
+    const lockChange = () => {
+      if (document.pointerLockElement) hadLock = true;
+      else if (hadLock) { hadLock = false; setLocked(false); }
+    };
     window.addEventListener("keydown", pause);
-    return () => window.removeEventListener("keydown", pause);
+    document.addEventListener("pointerlockchange", lockChange);
+    return () => { window.removeEventListener("keydown", pause); document.removeEventListener("pointerlockchange", lockChange); };
   }, []);
   const enter = () => {
     setLocked(true);
@@ -707,7 +721,7 @@ export default function World() {
         </div>
       )}
       {locked && <div className="game-crosshair" />}
-      {ready && <TimberControls trees={treesRef} player={playerRef} direction={directionRef} time={timeRef} carrying={carryingRef} saw={() => { setLocked(true); onSaw(directionRef.current.x, directionRef.current.z); }} take={() => { setLocked(true); onCarry(); }} />}
+      {ready && <TimberControls trees={treesRef} player={playerRef} direction={directionRef} time={timeRef} carrying={carryingRef} saw={() => { enter(); onSaw(directionRef.current.x, directionRef.current.z); }} take={() => { enter(); onCarry(); }} />}
     </div>
   );
 }
