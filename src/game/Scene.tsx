@@ -10,6 +10,9 @@ import { Play } from "lucide-react";
 import { Multiplayer } from "./Multiplayer";
 import { type Peer } from "./multiplayer";
 import { TreeBursts } from "./TreeBursts";
+import { Timber } from "./Timber";
+import { TimberControls } from "./TimberControls";
+import { CUT_SECONDS, carriedTree, cutTree, nearbyTimber, pickTimber, dropTimber, timberOwner } from "./timber";
 import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, DIG_REACH, step, createTrees, attractTrees, treePose, treeAhead, explodeTree, fillHole, digHole, digTunnel, recoverTrees, TUNNEL_HEIGHT, tunnelWidth, tunnelFurnishings, type Tunnel, type FallingTree, type Body } from "./world";
 
 declare global {
@@ -21,7 +24,7 @@ declare global {
       sim: (seconds: number) => void;
       view?: (x: number, z: number, targetX: number, targetZ: number) => void;
       avatars?: () => unknown[];
-      readonly state: { player: Body; players: Peer["pose"][]; holes: Hole[]; tunnels: Tunnel[]; furnishings: ReturnType<typeof tunnelFurnishings>; trees: (ReturnType<typeof treePose> & { buried: boolean; destroyed: boolean })[] };
+      readonly state: { player: Body; carrying: number; players: Peer["pose"][]; holes: Hole[]; tunnels: Tunnel[]; furnishings: ReturnType<typeof tunnelFurnishings>; trees: (ReturnType<typeof treePose> & { buried: boolean; destroyed: boolean; cut: boolean; timber: FallingTree["timber"] })[] };
     };
   }
 }
@@ -224,10 +227,11 @@ function Growth({ holes, trees, time, advance }: { holes: React.RefObject<Hole[]
     trees.current.forEach((tr, i) => {
       const g = treeRefs.current[i];
       if (g) {
-        g.visible = !tr.buried && !tr.destroyed;
+        g.visible = !tr.buried && !tr.destroyed && (tr.cutAt === undefined || t < tr.cutAt + CUT_SECONDS);
         const pose = treePose(tr, t);
         g.position.set(pose.x, pose.y, pose.z);
         g.rotation.set(pose.tilt * Math.cos(pose.heading), 0, -pose.tilt * Math.sin(pose.heading));
+        if (tr.cutAt !== undefined) g.rotation.z = -Math.PI / 2 * growth(t, tr.cutAt, CUT_SECONDS);
         g.scale.setScalar(tr.s * Math.max(0.001, 0.15 + 0.85 * growth(t, tr.birth)));
       }
     });
@@ -255,7 +259,7 @@ function Growth({ holes, trees, time, advance }: { holes: React.RefObject<Hole[]
   );
 }
 
-function Player({ onDig, onFill, onTunnel, holes, tunnels, pos, advance }: { onDig: (x: number, z: number) => void; onFill: (x: number, z: number) => void; onTunnel: (x: number, z: number) => void; holes: React.RefObject<Hole[]>; tunnels: React.RefObject<Tunnel[]>; pos: React.RefObject<Body>; advance: React.RefObject<(dt: number) => void> }) {
+function Player({ onDig, onFill, onTunnel, onSaw, onCarry, direction, holes, tunnels, pos, advance }: { onDig: (x: number, z: number) => void; onFill: (x: number, z: number) => void; onTunnel: (x: number, z: number) => void; onSaw: (x: number, z: number) => void; onCarry: () => void; direction: React.RefObject<{ x: number; z: number }>; holes: React.RefObject<Hole[]>; tunnels: React.RefObject<Tunnel[]>; pos: React.RefObject<Body>; advance: React.RefObject<(dt: number) => void> }) {
   const { camera } = useThree();
   const keys = useRef<Record<string, boolean>>({});
   const earth = useRef<THREE.Mesh>(null);
@@ -272,11 +276,13 @@ function Player({ onDig, onFill, onTunnel, holes, tunnels, pos, advance }: { onD
     const d = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
       keys.current[e.code] = true;
-      if ((e.code === "KeyE" || e.code === "KeyF" || e.code === "KeyT") && !e.repeat) {
+      if (["KeyE", "KeyF", "KeyT", "KeyV", "KeyR"].includes(e.code) && !e.repeat) {
         const dir = new THREE.Vector3();
         camera.getWorldDirection(dir); dir.y = 0; dir.normalize();
         const x = pos.current.x + dir.x * DIG_REACH, z = pos.current.z + dir.z * DIG_REACH;
         if (e.code === "KeyT") onTunnel(dir.x, dir.z);
+        else if (e.code === "KeyV") onSaw(dir.x, dir.z);
+        else if (e.code === "KeyR") onCarry();
         else if (e.code === "KeyE") {
           const inside = pos.current.y < 0 && holes.current.some((h) => Math.hypot(h.x - pos.current.x, h.z - pos.current.z) < h.r);
           onDig(inside ? pos.current.x : x, inside ? pos.current.z : z);
@@ -290,13 +296,14 @@ function Player({ onDig, onFill, onTunnel, holes, tunnels, pos, advance }: { onD
     const u = (e: KeyboardEvent) => (keys.current[e.code] = false);
     window.addEventListener("keydown", d); window.addEventListener("keyup", u);
     return () => { window.removeEventListener("keydown", d); window.removeEventListener("keyup", u); };
-  }, [camera, onDig, onFill, onTunnel, holes, pos]);
+  }, [camera, onDig, onFill, onTunnel, onSaw, onCarry, holes, pos]);
   const f = new THREE.Vector3(), r = new THREE.Vector3();
   const tick = (dt: number) => {
     const k = keys.current;
     const fw = (k["KeyW"] || k["ArrowUp"] ? 1 : 0) - (k["KeyS"] || k["ArrowDown"] ? 1 : 0);
     const st = (k["KeyD"] || k["ArrowRight"] ? 1 : 0) - (k["KeyA"] || k["ArrowLeft"] ? 1 : 0);
     camera.getWorldDirection(f); f.y = 0; f.normalize();
+    direction.current.x = f.x; direction.current.z = f.z;
     r.crossVectors(f, camera.up).normalize();
     const mx = (f.x * fw + r.x * st) * SPEED * dt, mz = (f.z * fw + r.z * st) * SPEED * dt;
     pos.current = step(pos.current, mx, mz, !!k["Space"], holes.current, dt, tunnels.current);
@@ -493,6 +500,9 @@ export default function World() {
   const timeRef = useRef(0);
   const advanceRef = useRef<(seconds: number) => void>(() => {});
   const playerRef = useRef<Body>({ x: 0, y: 0, z: 6, vy: 0 });
+  const directionRef = useRef({ x: 0, z: -1 });
+  const ownerRef = useRef("");
+  const carryingRef = useRef(-1);
   const peersRef = useRef(new Map<string, Peer>());
   const playerAdvanceRef = useRef<(dt: number) => void>(() => {});
   const saveRef = useRef<(edit?: WorldEdit) => void>(() => {});
@@ -504,6 +514,7 @@ export default function World() {
     let revision = 0;
     let seenRevision = -1;
     let canonical = snapshot([], [], createTrees(), playerRef.current, 0);
+    try { ownerRef.current = timberOwner(localStorage); } catch { ownerRef.current = crypto.randomUUID(); }
     try {
       const stored = JSON.parse(localStorage.getItem("forest-shared-player") ?? "null");
       const parsed = sharedSave(canonical, stored);
@@ -514,6 +525,7 @@ export default function World() {
       if (visible.holes !== holesRef.current) { holesRef.current = visible.holes; setHoles(visible.holes); }
       if (visible.tunnels !== tunnelsRef.current) { tunnelsRef.current = visible.tunnels; setTunnels(visible.tunnels); }
       treesRef.current = visible.trees;
+      carryingRef.current = carriedTree(visible.trees, ownerRef.current);
       timeRef.current = Math.max(timeRef.current, visible.time);
       advanceRef.current(0);
     };
@@ -606,6 +618,25 @@ export default function World() {
     advanceRef.current(0);
     saveRef.current({ kind: "fill", x, z, id: 0, time: timeRef.current, player: { ...playerRef.current } });
   }, []);
+  const onSaw = useCallback((x: number, z: number) => {
+    if (!connectedRef.current || carryingRef.current >= 0) return;
+    const index = treeAhead(treesRef.current, playerRef.current, x, z, timeRef.current);
+    if (index < 0) return;
+    treesRef.current = cutTree(treesRef.current, index, timeRef.current);
+    advanceRef.current(0);
+    saveRef.current({ kind: "cut", x, z, id: index, time: timeRef.current, player: { ...playerRef.current } });
+  }, []);
+  const onCarry = useCallback(() => {
+    if (!connectedRef.current || playerRef.current.buried) return;
+    const held = carryingRef.current;
+    const index = held >= 0 ? held : nearbyTimber(treesRef.current, playerRef.current, timeRef.current);
+    if (index < 0) return;
+    const next = held >= 0 ? dropTimber(treesRef.current, index, playerRef.current, ownerRef.current) : pickTimber(treesRef.current, index, playerRef.current, ownerRef.current, timeRef.current);
+    if (next === treesRef.current) return;
+    treesRef.current = next;
+    carryingRef.current = carriedTree(next, ownerRef.current);
+    saveRef.current({ kind: held >= 0 ? "drop" : "pickup", x: 0, z: 0, id: index, time: timeRef.current, player: { ...playerRef.current }, owner: ownerRef.current });
+  }, []);
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const previousView = window.__game?.view;
@@ -618,7 +649,7 @@ export default function World() {
         for (let remaining = seconds; remaining > 0; remaining -= 1 / 60) playerAdvanceRef.current(Math.min(remaining, 1 / 60));
       },
       ...(previousView ? { view: previousView } : {}),
-      get state() { return { player: { ...playerRef.current }, players: [...peersRef.current.values()].map((peer) => peer.pose), holes: holesRef.current, tunnels: tunnelsRef.current, furnishings: tunnelFurnishings(tunnelsRef.current), trees: treesRef.current.map((tr) => ({ ...treePose(tr, timeRef.current), buried: !!tr.buried, destroyed: !!tr.destroyed })) }; },
+      get state() { return { player: { ...playerRef.current }, carrying: carryingRef.current, players: [...peersRef.current.values()].map((peer) => peer.pose), holes: holesRef.current, tunnels: tunnelsRef.current, furnishings: tunnelFurnishings(tunnelsRef.current), trees: treesRef.current.map((tr) => ({ ...treePose(tr, timeRef.current), buried: !!tr.buried, destroyed: !!tr.destroyed, cut: tr.cutAt !== undefined, timber: tr.timber })) }; },
     };
     return () => { delete window.__game; };
   }, [onDig, onFill, onTunnel]);
@@ -660,11 +691,12 @@ export default function World() {
         <Horizon />
         <Growth holes={holesRef} trees={treesRef} time={timeRef} advance={advanceRef} />
         <TreeBursts trees={treesRef} time={timeRef} />
-        <Player onDig={onDig} onFill={onFill} onTunnel={onTunnel} holes={holesRef} tunnels={tunnelsRef} pos={playerRef} advance={playerAdvanceRef} />
+        <Timber trees={treesRef} time={timeRef} carrying={carryingRef} />
+        <Player onDig={onDig} onFill={onFill} onTunnel={onTunnel} onSaw={onSaw} onCarry={onCarry} direction={directionRef} holes={holesRef} tunnels={tunnelsRef} pos={playerRef} advance={playerAdvanceRef} />
         <Holes holes={holes} tunnels={tunnels} />
         <TunnelFurniture tunnels={tunnels} />
         <MouseLook playing={locked} />
-        <Multiplayer playing={locked} pos={playerRef} peers={peersRef} />
+        <Multiplayer playing={locked} pos={playerRef} peers={peersRef} carrying={carryingRef} />
         <Ready onReady={() => setReady(true)} />
       </Canvas>}
       {!locked && (
@@ -675,6 +707,7 @@ export default function World() {
         </div>
       )}
       {locked && <div className="game-crosshair" />}
+      {ready && <TimberControls trees={treesRef} player={playerRef} direction={directionRef} time={timeRef} carrying={carryingRef} saw={() => { setLocked(true); onSaw(directionRef.current.x, directionRef.current.z); }} take={() => { setLocked(true); onCarry(); }} />}
     </div>
   );
 }

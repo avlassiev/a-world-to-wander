@@ -15,6 +15,13 @@
       "when": 1794742061289,
       "tag": "0001_shared_forest_world",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795254933312,
+      "tag": "0002_preserve_shared_tree_changes",
+      "breakpoints": true
     }
   ]
 }

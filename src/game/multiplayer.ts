@@ -10,6 +10,7 @@ const poseSchema = z.object({
   pitch: z.number().finite().min(-Math.PI / 2).max(Math.PI / 2),
   moving: z.boolean(),
   buried: z.boolean(),
+  carrying: z.boolean().default(false),
 });
 
 export type PlayerPose = z.infer<typeof poseSchema>;

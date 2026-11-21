@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { supabase } from "@/integrations/supabase/client";
 import { acceptPose, turnTowards, walkSwing, type Peer, type PlayerPose } from "./multiplayer";
 import { type Body } from "./world";
+import { TimberPiece } from "./Timber";
 
 function Avatar({ id, peers }: { id: string; peers: RefObject<Map<string, Peer>> }) {
   const body = useRef<THREE.Group>(null);
@@ -12,6 +13,7 @@ function Avatar({ id, peers }: { id: string; peers: RefObject<Map<string, Peer>>
   const rightLeg = useRef<THREE.Group>(null);
   const leftArm = useRef<THREE.Group>(null);
   const rightArm = useRef<THREE.Group>(null);
+  const log = useRef<THREE.Group>(null);
   const initialized = useRef(false);
   const phase = useRef(0);
   const colors = useMemo(() => {
@@ -24,6 +26,7 @@ function Avatar({ id, peers }: { id: string; peers: RefObject<Map<string, Peer>>
     const group = body.current;
     if (!peer || !group) return;
     const pose = peer.pose;
+    if (log.current) log.current.visible = pose.carrying;
     group.visible = !pose.buried && performance.now() - peer.received < 8000;
     const blend = 1 - Math.exp(-15 * Math.min(delta, 0.1));
     if (!initialized.current || Math.hypot(group.position.x - pose.x, group.position.z - pose.z) > 8) {
@@ -40,12 +43,13 @@ function Avatar({ id, peers }: { id: string; peers: RefObject<Map<string, Peer>>
     const walking = pose.moving && performance.now() - peer.received < 700;
     phase.current += Math.min(delta, 0.1) * 10;
     const swing = walkSwing(walking, phase.current);
-    for (const [limb, angle] of [[leftLeg.current, swing], [rightLeg.current, -swing], [leftArm.current, -swing * 0.7], [rightArm.current, swing * 0.7]] as const) {
+    for (const [limb, angle] of [[leftLeg.current, swing], [rightLeg.current, -swing], [leftArm.current, pose.carrying ? 1.1 : -swing * 0.7], [rightArm.current, pose.carrying ? 1.1 : swing * 0.7]] as const) {
       if (limb) limb.rotation.x += (angle - limb.rotation.x) * blend;
     }
     group.userData["pose"] = { x: group.position.x, y: group.position.y, z: group.position.z, yaw: group.rotation.y, swing: leftLeg.current?.rotation.x ?? 0 };
   });
   return <group ref={body} name={`remote-player-${id}`}>
+    <group ref={log} visible={false} position={[0, 0.98, -0.45]} scale={0.65}><TimberPiece /></group>
     <mesh position={[0, 1.08, 0]} castShadow><boxGeometry args={[0.48, 0.62, 0.28]} /><meshStandardMaterial color={colors.shirt} /></mesh>
     <group ref={head} position={[0, 1.53, 0]}>
       <mesh castShadow><sphereGeometry args={[0.22, 12, 10]} /><meshStandardMaterial color={colors.skin} /></mesh>
@@ -63,7 +67,7 @@ function Avatar({ id, peers }: { id: string; peers: RefObject<Map<string, Peer>>
   </group>;
 }
 
-export function Multiplayer({ playing, pos, peers }: { playing: boolean; pos: RefObject<Body>; peers: RefObject<Map<string, Peer>> }) {
+export function Multiplayer({ playing, pos, peers, carrying }: { playing: boolean; pos: RefObject<Body>; peers: RefObject<Map<string, Peer>>; carrying: RefObject<number> }) {
   const { camera, scene } = useThree();
   const [ids, setIds] = useState<string[]>([]);
   useEffect(() => {
@@ -108,9 +112,9 @@ export function Multiplayer({ playing, pos, peers }: { playing: boolean; pos: Re
       const pose: PlayerPose = {
         id, seq: ++seq, x: pos.current.x, y: pos.current.y, z: pos.current.z,
         yaw: Math.atan2(-direction.x, -direction.z), pitch: Math.asin(Math.max(-1, Math.min(1, direction.y))),
-        moving, buried: !!pos.current.buried,
+        moving, buried: !!pos.current.buried, carrying: carrying.current >= 0,
       };
-      const changed = !previous || Math.hypot(pose.x - previous.x, pose.y - previous.y, pose.z - previous.z) > 0.005 || Math.abs(pose.yaw - previous.yaw) > 0.005 || Math.abs(pose.pitch - previous.pitch) > 0.005 || pose.moving !== previous.moving || pose.buried !== previous.buried;
+      const changed = !previous || Math.hypot(pose.x - previous.x, pose.y - previous.y, pose.z - previous.z) > 0.005 || Math.abs(pose.yaw - previous.yaw) > 0.005 || Math.abs(pose.pitch - previous.pitch) > 0.005 || pose.moving !== previous.moving || pose.buried !== previous.buried || pose.carrying !== previous.carrying;
       if (changed || now - lastSent > 2000) {
         void channel.send({ type: "broadcast", event: "pose", payload: pose });
         previous = pose;
@@ -144,6 +148,6 @@ export function Multiplayer({ playing, pos, peers }: { playing: boolean; pos: Re
       setIds([]);
       if (import.meta.env.DEV && window.__game) delete window.__game.avatars;
     };
-  }, [playing, camera, scene, pos, peers]);
+  }, [playing, camera, scene, pos, peers, carrying]);
   return <>{ids.map((id) => <Avatar key={id} id={id} peers={peers} />)}</>;
 }

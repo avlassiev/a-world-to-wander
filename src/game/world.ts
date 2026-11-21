@@ -56,6 +56,8 @@ export type FallingTree = {
   x: number; z: number; s: number; birth: number;
   buried?: boolean | undefined;
   destroyed?: boolean | undefined;
+  cutAt?: number | undefined;
+  timber?: { x: number; y: number; z: number; owner?: string | undefined } | undefined;
   explosion?: { x: number; y: number; z: number; time: number } | undefined;
   fall?: { hole: HoleShape & { id: number }; started: number } | undefined;
 };
@@ -74,7 +76,7 @@ export function createTrees(): FallingTree[] {
 
 /** New holes pull nearby trees in, or the nearest tree when dug away from the forest. */
 export function attractTrees(trees: FallingTree[], hole: HoleShape & { id: number }, time: number, isNew: boolean) {
-  const standing = trees.filter((tr) => !tr.buried && !tr.destroyed && !tr.fall && tr.birth <= time);
+  const standing = trees.filter((tr) => !tr.buried && !tr.destroyed && tr.cutAt === undefined && !tr.fall && tr.birth <= time);
   const distance = (tr: FallingTree) => Math.hypot(tr.x - hole.x, tr.z - hole.z);
   const nearby = standing.filter((tr) => distance(tr) <= hole.r + (isNew ? 3 : 0.2));
   if (isNew && nearby.length === 0) {
@@ -110,7 +112,7 @@ export function treeAhead(trees: FallingTree[], player: Body, dirX: number, dirZ
   let closest = TREE_BLAST_REACH;
   let selected = -1;
   trees.forEach((tr, index) => {
-    if (tr.destroyed || tr.buried || tr.birth > time) return;
+    if (tr.destroyed || tr.buried || tr.cutAt !== undefined || tr.birth > time) return;
     const pose = treePose(tr, time);
     const dx = pose.x - player.x, dz = pose.z - player.z;
     const distance = Math.hypot(dx, dz);
@@ -127,7 +129,7 @@ export function treeAhead(trees: FallingTree[], player: Body, dirX: number, dirZ
 /** Destruction is permanent and idempotent, including when a shared edit is replayed. */
 export function explodeTree(trees: FallingTree[], index: number, time: number): FallingTree[] {
   const tree = trees[index];
-  if (!tree || tree.destroyed || tree.buried) return trees;
+  if (!tree || tree.destroyed || tree.buried || tree.cutAt !== undefined) return trees;
   const pose = treePose(tree, time);
   return trees.map((tr, i) => i === index ? { ...tr, destroyed: true, explosion: { x: pose.x, y: pose.y, z: pose.z, time } } : tr);
 }
@@ -192,7 +194,7 @@ export function digTunnel(holes: Pit[], tunnels: Tunnel[], player: Body, dirX: n
 export function recoverTrees(trees: FallingTree[], pit: Pit, time: number) {
   for (const tr of trees) {
     const old = tr.fall?.hole;
-    if (!tr.destroyed && tr.buried && old && Math.hypot(old.x - pit.x, old.z - pit.z) < pit.r && pit.d >= old.d) {
+    if (!tr.destroyed && tr.cutAt === undefined && tr.buried && old && Math.hypot(old.x - pit.x, old.z - pit.z) < pit.r && pit.d >= old.d) {
       tr.buried = false;
       tr.fall = { hole: pit, started: time - TREE_FALL_SECONDS };
     }

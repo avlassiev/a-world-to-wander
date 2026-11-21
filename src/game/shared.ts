@@ -1,7 +1,8 @@
 import { parseSave, type WorldSave } from "./save";
 import { attractTrees, createTrees, digHole, digTunnel, explodeTree, fillHole, recoverTrees, type Body } from "./world";
+import { cutTree, pickTimber, dropTimber } from "./timber";
 
-export type WorldEdit = { kind: "dig" | "fill" | "tunnel" | "blast"; x: number; z: number; id: number; time: number; player: Body };
+export type WorldEdit = { kind: "dig" | "fill" | "tunnel" | "blast" | "cut" | "pickup" | "drop"; x: number; z: number; id: number; time: number; player: Body; owner?: string };
 export function sharedSave(value: unknown, player: Body): WorldSave | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const saved = parseSave({ ...value, player });
@@ -25,6 +26,9 @@ export function applyWorldEdit(saved: WorldSave, edit: WorldEdit): WorldSave {
     next.holes = filled.holes;
     next.trees = filled.trees;
   } else if (edit.kind === "blast") next.trees = explodeTree(next.trees, edit.id, edit.time);
+  else if (edit.kind === "cut") next.trees = cutTree(next.trees, edit.id, edit.time);
+  else if (edit.kind === "pickup") next.trees = pickTimber(next.trees, edit.id, edit.player, edit.owner ?? "", edit.time);
+  else if (edit.kind === "drop") next.trees = dropTimber(next.trees, edit.id, edit.player, edit.owner ?? "");
   else next.tunnels = digTunnel(next.holes, next.tunnels, edit.player, edit.x, edit.z);
   next.savedAt = Date.now();
   return next;

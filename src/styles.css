@@ -73,6 +73,9 @@
 }
 
 :root {
+  --game-timber-end: #dfbd7c;
+  --game-tool-background: oklch(0.96 0.02 100);
+  --game-tool-foreground: oklch(0.25 0.02 145);
   --game-blast-leaves: #438947;
   --game-blast-wood: #996641;
   --game-blast-flash: #ffe68a;
@@ -186,3 +189,9 @@
 .game-play { width: 128px; height: 128px; margin-top: 20px; border-radius: 50%; background: var(--game-play); color: var(--game-play-foreground); box-shadow: var(--game-play-shadow); }
 .game-play:hover { background: var(--game-play-hover); }
 .game-play svg { width: 60px; height: 60px; fill: currentColor; margin-left: 6px; }
+.game-timber-tools { position: absolute; bottom: 24px; right: 24px; z-index: 20; display: flex; gap: 12px; }
+.game-tool { width: 68px; height: 68px; padding: 0; border-radius: 8px; background: var(--game-tool-background); color: var(--game-tool-foreground); box-shadow: var(--game-play-shadow); }
+.game-tool:hover { background: var(--game-play-hover); }
+.game-tool span { font-size: 36px; line-height: 1; }
+.game-tool svg { width: 34px; height: 34px; }
+@media (max-width: 480px) { .game-timber-tools { bottom: 16px; right: 16px; gap: 10px; } .game-tool { width: 58px; height: 58px; } }
