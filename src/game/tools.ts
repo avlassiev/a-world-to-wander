@@ -33,6 +33,11 @@ export function returnTool(tools: Tool[], owner: string): Tool[] {
   return tools.map((t) => (t.owner === owner ? { kind: t.kind } : t));
 }
 
+/** Tools held by players who left without returning them jump back onto the shelf. */
+export function releaseOrphanedTools(tools: Tool[], activeOwners: Set<string>): Tool[] {
+  return tools.map((t) => (t.owner && !activeOwners.has(t.owner) ? { kind: t.kind } : t));
+}
+
 /** The next free tool a visitor at the shelf would take, in shelf order. */
 export function nextFreeTool(tools: Tool[], player: Body, owner: string): ToolKind | null {
   if (!owner || heldTool(tools, owner) || !nearShelf(player)) return null;

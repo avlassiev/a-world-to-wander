@@ -28,6 +28,12 @@ describe("common forest", () => {
     const second = applyWorldEdit(first, edit(60, 2));
     expect(second.holes.map((h) => h.id)).toEqual([1, 2]);
   });
+  it("puts missing tools back on the shelf of an older save", () => {
+    const old = snapshot([], [], createTrees(), player, 0);
+    old.tools = [{ kind: "shovel" }];
+    const loaded = sharedSave(old, player);
+    expect(loaded?.tools?.map((t) => t.kind).sort()).toEqual(["broom", "shovel", "weapon"]);
+  });
   it("shares rooms and furniture without moving the other player", () => {
     const base = snapshot([], [{ x: 0, z: 16.2, floor: -3.2, shaft: 123, room: true }], createTrees(), { ...player, x: 90 }, 50);
     const loaded = sharedSave(base, player);

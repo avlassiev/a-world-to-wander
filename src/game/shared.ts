@@ -9,8 +9,12 @@ export function sharedSave(value: unknown, player: Body): WorldSave | null {
   const saved = parseSave({ ...value, player });
   // Older worlds stored only the 40 nearby trees; distant visible trees now share the same rules.
   if (saved?.trees.length === 40) saved.trees.push(...createTrees().slice(40));
-  // Worlds saved before the shed existed get a full shelf.
-  if (saved && !saved.tools) saved.tools = defaultTools();
+  // Worlds saved before the shed existed get a full shelf; partial shelves get the missing kinds back.
+  if (saved) {
+    const tools = saved.tools ?? [];
+    for (const tool of defaultTools()) if (!tools.some((t) => t.kind === tool.kind)) tools.push(tool);
+    saved.tools = tools;
+  }
   return saved;
 }
 export function applyWorldEdit(saved: WorldSave, edit: WorldEdit): WorldSave {

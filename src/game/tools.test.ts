@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultTools, heldTool, nearShelf, nextFreeTool, returnTool, takeTool } from "./tools";
+import { defaultTools, heldTool, nearShelf, nextFreeTool, releaseOrphanedTools, returnTool, takeTool } from "./tools";
 import { SHELF } from "./world";
 
 const atShelf = { x: SHELF.x - 1, y: 0, z: SHELF.z, vy: 0 };
@@ -28,6 +28,13 @@ describe("tool shed", () => {
     const back = returnTool(withShovel, "me");
     expect(heldTool(back, "me")).toBeNull();
     expect(back).toEqual(defaultTools());
+  });
+  it("a tool left behind by a player who closed the game returns to the shelf", () => {
+    const tools = takeTool(takeTool(defaultTools(), "shovel", atShelf, "me"), "broom", atShelf, "gone");
+    const freed = releaseOrphanedTools(tools, new Set(["me"]));
+    expect(heldTool(freed, "me")).toBe("shovel");
+    expect(freed.find((t) => t.kind === "broom")?.owner).toBeUndefined();
+    expect(releaseOrphanedTools(tools, new Set(["me", "gone"]))).toEqual(tools);
   });
   it("the shelf offers the first free tool and nothing when hands are full", () => {
     expect(nextFreeTool(defaultTools(), atShelf, "me")).toBe("shovel");

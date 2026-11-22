@@ -14,7 +14,7 @@ import { Timber } from "./Timber";
 import { TimberControls } from "./TimberControls";
 import { DayNight } from "./DayNight";
 import { CUT_SECONDS, carriedTree, cutTree, nearbyTimber, pickTimber, dropTimber, timberOwner } from "./timber";
-import { defaultTools, heldTool, nextFreeTool, returnTool, takeTool, type Tool, type ToolKind } from "./tools";
+import { defaultTools, heldTool, nextFreeTool, releaseOrphanedTools, returnTool, takeTool, type Tool, type ToolKind } from "./tools";
 import { Shed, HeldTool, ToolControls } from "./Tools";
 import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, DIG_REACH, step, createTrees, attractTrees, treePose, treeAhead, explodeTree, fillHole, digHole, digTunnel, recoverTrees, TUNNEL_HEIGHT, tunnelWidth, tunnelFurnishings, type Tunnel, type FallingTree, type Body } from "./world";
 
@@ -618,6 +618,19 @@ export default function World() {
     };
     void sync();
     const timer = setInterval(() => saveRef.current(), 1500);
+    // Once presence settles, tools held by players who left without returning them go back to the shelf.
+    const orphanTimer = setTimeout(() => {
+      if (!active || !connectedRef.current) return;
+      const activeOwners = new Set([ownerRef.current, ...peersRef.current.keys()]);
+      const freed = releaseOrphanedTools(toolsRef.current, activeOwners);
+      for (const tool of toolsRef.current) {
+        if (tool.owner && !freed.find((t) => t.kind === tool.kind)?.owner) {
+          editsRef.current.push({ kind: "return-tool", x: 0, z: 0, id: 0, time: timeRef.current, player: { ...playerRef.current }, owner: tool.owner, tool: tool.kind });
+        }
+      }
+      toolsRef.current = freed;
+      saveRef.current();
+    }, 4000);
     const leave = () => {
       // A held tool goes back to the shelf when the game closes, so it never stays locked.
       const held = heldTool(toolsRef.current, ownerRef.current);
@@ -631,6 +644,7 @@ export default function World() {
     return () => {
       active = false;
       clearInterval(timer);
+      clearTimeout(orphanTimer);
       window.removeEventListener("pagehide", leave);
       saveRef.current = () => {};
     };
