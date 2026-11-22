@@ -200,4 +200,5 @@
 .game-tool:hover { background: var(--game-play-hover); }
 .game-tool span { font-size: 36px; line-height: 1; }
 .game-tool svg { width: 34px; height: 34px; }
+.game-camera-tool { position: absolute; top: 20px; right: 20px; z-index: 20; }
 @media (max-width: 480px) { .game-timber-tools { bottom: 16px; right: 16px; gap: 10px; } .game-tool { width: 58px; height: 58px; } }

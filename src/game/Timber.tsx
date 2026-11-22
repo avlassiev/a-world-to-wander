@@ -15,7 +15,7 @@ export function TimberPiece() {
   </group>;
 }
 
-export function Timber({ trees, time, carrying }: { trees: RefObject<FallingTree[]>; time: RefObject<number>; carrying: RefObject<number> }) {
+export function Timber({ trees, time, carrying, thirdPerson }: { trees: RefObject<FallingTree[]>; time: RefObject<number>; carrying: RefObject<number>; thirdPerson: RefObject<boolean> }) {
   const { camera } = useThree();
   const logs = useRef<(THREE.Group | null)[]>([]);
   const stumps = useRef<(THREE.Group | null)[]>([]);
@@ -37,7 +37,7 @@ export function Timber({ trees, time, carrying }: { trees: RefObject<FallingTree
       }
     });
     if (held.current) {
-      held.current.visible = carrying.current >= 0;
+      held.current.visible = carrying.current >= 0 && !thirdPerson.current;
       offset.set(0.18, -0.48, -1.05).applyQuaternion(camera.quaternion);
       held.current.position.copy(camera.position).add(offset);
       held.current.quaternion.copy(camera.quaternion);

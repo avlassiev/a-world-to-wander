@@ -6,7 +6,7 @@ import { acceptPose, turnTowards, walkSwing, type Peer, type PlayerPose } from "
 import { type Body } from "./world";
 import { TimberPiece } from "./Timber";
 
-function Avatar({ id, peers }: { id: string; peers: RefObject<Map<string, Peer>> }) {
+export function Avatar({ id, peers, local = false }: { id: string; peers: RefObject<Map<string, Peer>>; local?: boolean }) {
   const body = useRef<THREE.Group>(null);
   const head = useRef<THREE.Group>(null);
   const leftLeg = useRef<THREE.Group>(null);
@@ -28,7 +28,7 @@ function Avatar({ id, peers }: { id: string; peers: RefObject<Map<string, Peer>>
     const pose = peer.pose;
     if (log.current) log.current.visible = pose.carrying;
     group.visible = !pose.buried && performance.now() - peer.received < 8000;
-    const blend = 1 - Math.exp(-15 * Math.min(delta, 0.1));
+    const blend = local ? 1 : 1 - Math.exp(-15 * Math.min(delta, 0.1));
     if (!initialized.current || Math.hypot(group.position.x - pose.x, group.position.z - pose.z) > 8) {
       group.position.set(pose.x, pose.y, pose.z);
       group.rotation.y = pose.yaw;
@@ -48,7 +48,7 @@ function Avatar({ id, peers }: { id: string; peers: RefObject<Map<string, Peer>>
     }
     group.userData["pose"] = { x: group.position.x, y: group.position.y, z: group.position.z, yaw: group.rotation.y, swing: leftLeg.current?.rotation.x ?? 0 };
   });
-  return <group ref={body} name={`remote-player-${id}`}>
+  return <group ref={body} name={local ? "local-player" : `remote-player-${id}`}>
     <group ref={log} visible={false} position={[0, 0.98, -0.45]} scale={0.65}><TimberPiece /></group>
     <mesh position={[0, 1.08, 0]} castShadow><boxGeometry args={[0.48, 0.62, 0.28]} /><meshStandardMaterial color={colors.shirt} /></mesh>
     <group ref={head} position={[0, 1.53, 0]}>

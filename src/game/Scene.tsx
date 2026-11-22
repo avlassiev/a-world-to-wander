@@ -5,8 +5,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { snapshot } from "./save";
 import { applyWorldEdit, sharedSave, type WorldEdit } from "./shared";
 import { Button } from "@/components/ui/button";
-import { Play } from "lucide-react";
-import { Multiplayer } from "./Multiplayer";
+import { Play, Eye, PersonStanding } from "lucide-react";
+import { Multiplayer, Avatar } from "./Multiplayer";
+import { CHASE_DISTANCE, chasePosition } from "./camera";
 import { type Peer } from "./multiplayer";
 import { TreeBursts } from "./TreeBursts";
 import { Timber } from "./Timber";
@@ -25,6 +26,7 @@ declare global {
       sky: (seconds: number | null) => void;
       view?: (x: number, z: number, targetX: number, targetZ: number) => void;
       avatars?: () => unknown[];
+      camera?: () => { thirdPerson: boolean; x: number; y: number; z: number; yaw: number; pitch: number };
       readonly state: { player: Body; carrying: number; players: Peer["pose"][]; holes: Hole[]; tunnels: Tunnel[]; furnishings: ReturnType<typeof tunnelFurnishings>; trees: (ReturnType<typeof treePose> & { buried: boolean; destroyed: boolean; cut: boolean; timber: FallingTree["timber"] })[] };
     };
   }
@@ -260,8 +262,12 @@ function Growth({ holes, trees, time, advance }: { holes: React.RefObject<Hole[]
   );
 }
 
-function Player({ onDig, onFill, onTunnel, onSaw, onCarry, direction, holes, tunnels, pos, advance }: { onDig: (x: number, z: number) => void; onFill: (x: number, z: number) => void; onTunnel: (x: number, z: number) => void; onSaw: (x: number, z: number) => void; onCarry: () => void; direction: React.RefObject<{ x: number; z: number }>; holes: React.RefObject<Hole[]>; tunnels: React.RefObject<Tunnel[]>; pos: React.RefObject<Body>; advance: React.RefObject<(dt: number) => void> }) {
-  const { camera } = useThree();
+function Player({ onDig, onFill, onTunnel, onSaw, onCarry, direction, holes, tunnels, pos, advance, thirdPerson, carrying }: { onDig: (x: number, z: number) => void; onFill: (x: number, z: number) => void; onTunnel: (x: number, z: number) => void; onSaw: (x: number, z: number) => void; onCarry: () => void; direction: React.RefObject<{ x: number; z: number }>; holes: React.RefObject<Hole[]>; tunnels: React.RefObject<Tunnel[]>; pos: React.RefObject<Body>; advance: React.RefObject<(dt: number) => void>; thirdPerson: React.RefObject<boolean>; carrying: React.RefObject<number> }) {
+  const { camera, scene } = useThree();
+  const self = useRef(new Map<string, Peer>());
+  const ray = useMemo(() => new THREE.Raycaster(), []);
+  const origin = useMemo(() => new THREE.Vector3(), []);
+  const backward = useMemo(() => new THREE.Vector3(), []);
   const keys = useRef<Record<string, boolean>>({});
   const earth = useRef<THREE.Mesh>(null);
   const lantern = useRef<THREE.PointLight>(null);
@@ -274,6 +280,7 @@ function Player({ onDig, onFill, onTunnel, onSaw, onCarry, direction, holes, tun
       camera.position.set(x, EYE, z);
       camera.lookAt(targetX, 0, targetZ);
     };
+    if (import.meta.env.DEV && window.__game) window.__game.camera = () => ({ thirdPerson: thirdPerson.current, x: camera.position.x, y: camera.position.y, z: camera.position.z, yaw: camera.rotation.y, pitch: camera.rotation.x });
     const d = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
       keys.current[e.code] = true;
@@ -310,8 +317,28 @@ function Player({ onDig, onFill, onTunnel, onSaw, onCarry, direction, holes, tun
     r.crossVectors(f, camera.up).normalize();
     const mx = (f.x * fw + r.x * st) * SPEED * dt, mz = (f.z * fw + r.z * st) * SPEED * dt;
     pos.current = step(pos.current, mx, mz, !!k["Space"], holes.current, dt, tunnels.current);
-    camera.position.set(pos.current.x, pos.current.y + EYE, pos.current.z);
-    if (lantern.current) lantern.current.position.copy(camera.position);
+    if (thirdPerson.current && !pos.current.buried) {
+      camera.getWorldDirection(backward);
+      origin.set(pos.current.x, pos.current.y + EYE + 0.25, pos.current.z);
+      backward.negate();
+      ray.set(origin, backward);
+      ray.far = CHASE_DISTANCE;
+      const obstacles = ray.intersectObjects(scene.children, true).filter((hit) => {
+        let object: THREE.Object3D | null = hit.object;
+        while (object) {
+          if (!object.visible || object.name === "local-player" || object.name.startsWith("remote-player-") || object.name === "carried-timber") return false;
+          object = object.parent;
+        }
+        if (!(hit.object instanceof THREE.Mesh)) return false;
+        const materials = Array.isArray(hit.object.material) ? hit.object.material : [hit.object.material];
+        return materials.some((material) => material.visible && material.depthWrite && !material.transparent);
+      });
+      const distance = obstacles[0] ? Math.max(0, obstacles[0].distance - 0.2) : CHASE_DISTANCE;
+      const position = chasePosition(pos.current, { x: -backward.x, y: -backward.y, z: -backward.z }, distance);
+      camera.position.set(position.x, position.y, position.z);
+    } else camera.position.set(pos.current.x, pos.current.y + EYE, pos.current.z);
+    self.current.set("self", { received: performance.now(), pose: { id: "self", seq: 0, x: pos.current.x, y: pos.current.y, z: pos.current.z, yaw: Math.atan2(-f.x, -f.z), pitch: camera.rotation.x, moving: fw !== 0 || st !== 0, buried: !thirdPerson.current || !!pos.current.buried || camera.position.distanceTo(origin) < 0.65, carrying: carrying.current >= 0 } });
+    if (lantern.current) lantern.current.position.set(pos.current.x, pos.current.y + EYE, pos.current.z);
     if (earth.current) {
       earth.current.visible = !!pos.current.buried;
       earth.current.position.copy(camera.position);
@@ -319,7 +346,7 @@ function Player({ onDig, onFill, onTunnel, onSaw, onCarry, direction, holes, tun
   };
   advance.current = tick;
   useFrame((_, delta) => tick(Math.min(delta, 0.05)));
-  return <><pointLight ref={lantern} intensity={7} distance={9} decay={1.5} /><mesh ref={earth} visible={false} renderOrder={1000}>
+  return <><Avatar id="self" peers={self} local /><pointLight ref={lantern} intensity={7} distance={9} decay={1.5} /><mesh ref={earth} visible={false} renderOrder={1000}>
     <sphereGeometry args={[0.3, 16, 12]} />
     <meshBasicMaterial map={wood} color="#5a3b22" side={THREE.BackSide} depthTest={false} depthWrite={false} />
   </mesh></>;
@@ -500,6 +527,8 @@ export default function World() {
   const [loaded, setLoaded] = useState(false);
   const [saveStatus, setSaveStatus] = useState("Загрузка мира…");
   const [locked, setLocked] = useState(false);
+  const [thirdPerson, setThirdPerson] = useState(false);
+  const thirdPersonRef = useRef(false);
   const [holes, setHoles] = useState<Hole[]>([]);
   const holesRef = useRef<Hole[]>([]);
   const [tunnels, setTunnels] = useState<Tunnel[]>([]);
@@ -700,8 +729,8 @@ export default function World() {
         <Horizon />
         <Growth holes={holesRef} trees={treesRef} time={timeRef} advance={advanceRef} />
         <TreeBursts trees={treesRef} time={timeRef} />
-        <Timber trees={treesRef} time={timeRef} carrying={carryingRef} />
-        <Player onDig={onDig} onFill={onFill} onTunnel={onTunnel} onSaw={onSaw} onCarry={onCarry} direction={directionRef} holes={holesRef} tunnels={tunnelsRef} pos={playerRef} advance={playerAdvanceRef} />
+        <Timber trees={treesRef} time={timeRef} carrying={carryingRef} thirdPerson={thirdPersonRef} />
+        <Player onDig={onDig} onFill={onFill} onTunnel={onTunnel} onSaw={onSaw} onCarry={onCarry} direction={directionRef} holes={holesRef} tunnels={tunnelsRef} pos={playerRef} advance={playerAdvanceRef} thirdPerson={thirdPersonRef} carrying={carryingRef} />
         <Holes holes={holes} tunnels={tunnels} />
         <TunnelFurniture tunnels={tunnels} />
         <MouseLook playing={locked} />
@@ -716,6 +745,7 @@ export default function World() {
         </div>
       )}
       {locked && <div className="game-crosshair" />}
+      {ready && <Button className="game-tool game-camera-tool" aria-label={thirdPerson ? "Вид глазами" : "Вид от третьего лица"} title={thirdPerson ? "Вид глазами" : "Вид от третьего лица"} aria-pressed={thirdPerson} onClick={() => { thirdPersonRef.current = !thirdPersonRef.current; setThirdPerson(thirdPersonRef.current); enter(); }}>{thirdPerson ? <Eye /> : <PersonStanding />}</Button>}
       {ready && <TimberControls trees={treesRef} player={playerRef} direction={directionRef} time={timeRef} carrying={carryingRef} saw={() => { enter(); onSaw(directionRef.current.x, directionRef.current.z); }} take={() => { enter(); onCarry(); }} />}
     </div>
   );
