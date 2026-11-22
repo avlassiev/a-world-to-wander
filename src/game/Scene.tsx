@@ -14,7 +14,7 @@ import { Timber } from "./Timber";
 import { TimberControls } from "./TimberControls";
 import { DayNight } from "./DayNight";
 import { CUT_SECONDS, carriedTree, cutTree, nearbyTimber, pickTimber, dropTimber, timberOwner } from "./timber";
-import { defaultTools, heldTool, nextFreeTool, returnTool, takeTool, type Tool } from "./tools";
+import { defaultTools, heldTool, nextFreeTool, returnTool, takeTool, type Tool, type ToolKind } from "./tools";
 import { Shed, HeldTool, ToolControls } from "./Tools";
 import { DOOR, EYE, HOUSE, SPEED, WINDOW, growth, inPond, ponds, DIG_REACH, step, createTrees, attractTrees, treePose, treeAhead, explodeTree, fillHole, digHole, digTunnel, recoverTrees, TUNNEL_HEIGHT, tunnelWidth, tunnelFurnishings, type Tunnel, type FallingTree, type Body } from "./world";
 
@@ -29,7 +29,7 @@ declare global {
       view?: (x: number, z: number, targetX: number, targetZ: number) => void;
       avatars?: () => unknown[];
       camera?: () => { thirdPerson: boolean; x: number; y: number; z: number; yaw: number; pitch: number };
-      tool?: () => void;
+      tool?: (kind?: ToolKind) => void;
       readonly state: { player: Body; carrying: number; tool: string | null; tools: Tool[]; players: Peer["pose"][]; holes: Hole[]; tunnels: Tunnel[]; furnishings: ReturnType<typeof tunnelFurnishings>; trees: (ReturnType<typeof treePose> & { buried: boolean; destroyed: boolean; cut: boolean; timber: FallingTree["timber"] })[] };
     };
   }
@@ -556,7 +556,7 @@ export default function World() {
     let busy = false;
     let revision = 0;
     let seenRevision = -1;
-    let canonical = snapshot([], [], createTrees(), defaultTools(), playerRef.current, 0);
+    let canonical = snapshot([], [], createTrees(), playerRef.current, 0);
     try { ownerRef.current = timberOwner(localStorage); } catch { ownerRef.current = crypto.randomUUID(); }
     try {
       const stored = JSON.parse(localStorage.getItem("forest-shared-player") ?? "null");
@@ -618,7 +618,15 @@ export default function World() {
     };
     void sync();
     const timer = setInterval(() => saveRef.current(), 1500);
-    const leave = () => saveRef.current();
+    const leave = () => {
+      // A held tool goes back to the shelf when the game closes, so it never stays locked.
+      const held = heldTool(toolsRef.current, ownerRef.current);
+      if (held) {
+        toolsRef.current = returnTool(toolsRef.current, ownerRef.current);
+        editsRef.current.push({ kind: "return-tool", x: 0, z: 0, id: 0, time: timeRef.current, player: { ...playerRef.current }, owner: ownerRef.current, tool: held });
+      }
+      saveRef.current();
+    };
     window.addEventListener("pagehide", leave);
     return () => {
       active = false;
@@ -682,7 +690,7 @@ export default function World() {
     carryingRef.current = carriedTree(next, ownerRef.current);
     saveRef.current({ kind: held >= 0 ? "drop" : "pickup", x: 0, z: 0, id: index, time: timeRef.current, player: { ...playerRef.current }, owner: ownerRef.current });
   }, []);
-  const onTool = useCallback(() => {
+  const onTool = useCallback((kind?: ToolKind) => {
     if (!connectedRef.current) return;
     const held = heldTool(toolsRef.current, ownerRef.current);
     if (held) {
@@ -690,7 +698,7 @@ export default function World() {
       saveRef.current({ kind: "return-tool", x: 0, z: 0, id: 0, time: timeRef.current, player: { ...playerRef.current }, owner: ownerRef.current, tool: held });
       return;
     }
-    const kind = nextFreeTool(toolsRef.current, playerRef.current, ownerRef.current);
+    kind ??= nextFreeTool(toolsRef.current, playerRef.current, ownerRef.current) ?? undefined;
     if (!kind) return;
     toolsRef.current = takeTool(toolsRef.current, kind, playerRef.current, ownerRef.current);
     saveRef.current({ kind: "take-tool", x: 0, z: 0, id: 0, time: timeRef.current, player: { ...playerRef.current }, owner: ownerRef.current, tool: kind });
@@ -770,7 +778,7 @@ export default function World() {
       {locked && <div className="game-crosshair" />}
       {ready && <Button className="game-tool game-camera-tool" aria-label={thirdPerson ? "Вид глазами" : "Вид от третьего лица"} title={thirdPerson ? "Вид глазами" : "Вид от третьего лица"} aria-pressed={thirdPerson} onClick={() => { thirdPersonRef.current = !thirdPersonRef.current; setThirdPerson(thirdPersonRef.current); enter(); }}>{thirdPerson ? <Eye /> : <PersonStanding />}</Button>}
       {ready && <TimberControls trees={treesRef} player={playerRef} direction={directionRef} time={timeRef} carrying={carryingRef} saw={() => { enter(); onSaw(directionRef.current.x, directionRef.current.z); }} take={() => { enter(); onCarry(); }} />}
-      {ready && <ToolControls tools={toolsRef} player={playerRef} owner={ownerRef} onUse={() => { enter(); onTool(); }} />}
+      {ready && <ToolControls tools={toolsRef} player={playerRef} owner={ownerRef} onUse={(kind) => { enter(); onTool(kind); }} />}
     </div>
   );
 }

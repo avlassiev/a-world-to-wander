@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { ArrowDownToLine, Hand } from "lucide-react";
+import { ArrowDownToLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SHED, SHED_DOOR, SHELF } from "./world";
-import { heldTool, nextFreeTool, type Tool, type ToolKind } from "./tools";
+import { TOOL_KINDS, heldTool, nextFreeTool, type Tool, type ToolKind } from "./tools";
 import type { Body } from "./world";
 
 export const TOOL_ICONS: Record<ToolKind, string> = { shovel: "⛏️", broom: "🧹", weapon: "⚔️" };
@@ -91,23 +91,32 @@ export function HeldTool({ tools, owner, thirdPerson }: { tools: RefObject<Tool[
   </group>;
 }
 
-/** Round button near the shelf: take the next free tool or put the held one back. */
-export function ToolControls({ tools, player, owner, onUse }: { tools: RefObject<Tool[]>; player: RefObject<Body>; owner: RefObject<string>; onUse: () => void }) {
-  const [state, setState] = useState<{ held: ToolKind | null; next: ToolKind | null }>({ held: null, next: null });
+/** Buttons near the shelf: take the shovel, broom or sword, or put the held one back. */
+export function ToolControls({ tools, player, owner, onUse }: { tools: RefObject<Tool[]>; player: RefObject<Body>; owner: RefObject<string>; onUse: (kind?: ToolKind) => void }) {
+  const [state, setState] = useState<{ held: ToolKind | null; free: ToolKind[] }>({ held: null, free: [] });
   useEffect(() => {
     const refresh = () => {
-      const next = { held: heldTool(tools.current, owner.current), next: nextFreeTool(tools.current, player.current, owner.current) };
-      setState((old) => old.held === next.held && old.next === next.next ? old : next);
+      const held = heldTool(tools.current, owner.current);
+      const free = held ? [] : TOOL_KINDS.filter((kind) => {
+        const tool = tools.current.find((t) => t.kind === kind);
+        return tool && !tool.owner && nextFreeTool([tool], player.current, owner.current) === kind;
+      });
+      setState((old) => old.held === held && old.free.join() === free.join() ? old : { held, free });
     };
     refresh();
     const timer = setInterval(refresh, 200);
     return () => clearInterval(timer);
   }, [tools, player, owner]);
-  const active = state.held ?? state.next;
   return <div className="game-shed-tools">
     {state.held && <div className="game-tool-badge" aria-hidden="true">{TOOL_ICONS[state.held]}</div>}
-    <Button className="game-tool" disabled={!active} aria-label={state.held ? "Вернуть инструмент" : "Взять инструмент"} title={state.held ? "Вернуть инструмент" : "Взять инструмент"} onClick={(event) => { event.currentTarget.blur(); onUse(); }}>
-      {state.held ? <ArrowDownToLine aria-hidden="true" /> : <Hand aria-hidden="true" />}
-    </Button>
+    {state.held ? (
+      <Button className="game-tool" aria-label="Вернуть инструмент" title="Вернуть инструмент" onClick={(event) => { event.currentTarget.blur(); onUse(); }}>
+        <ArrowDownToLine aria-hidden="true" />
+      </Button>
+    ) : (["shovel", "broom", "weapon"] as ToolKind[]).map((kind) => (
+      <Button key={kind} className="game-tool" disabled={!state.free.includes(kind)} aria-label={`Взять: ${TOOL_ICONS[kind]}`} title={`Взять: ${TOOL_ICONS[kind]}`} onClick={(event) => { event.currentTarget.blur(); onUse(kind); }}>
+        <span aria-hidden="true">{TOOL_ICONS[kind]}</span>
+      </Button>
+    ))}
   </div>;
 }
