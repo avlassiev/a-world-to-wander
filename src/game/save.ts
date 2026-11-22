@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Body, FallingTree, Pit, Tunnel } from "./world";
+import type { Tool } from "./tools";
 
 const number = z.number().finite();
 const shape = z.object({ x: number, z: number, r: number.positive(), d: number.positive() });
@@ -9,11 +10,12 @@ export const saveSchema = z.object({
   holes: z.array(pit).max(150),
   tunnels: z.array(z.object({ x: number, z: number, floor: number, shaft: number, room: z.boolean().optional() })),
   trees: z.array(z.object({ x: number, z: number, s: number, birth: number, buried: z.boolean().optional(), destroyed: z.boolean().optional(), cutAt: number.optional(), timber: z.object({ x: number, y: number, z: number, owner: z.string().optional() }).optional(), explosion: z.object({ x: number, y: number, z: number, time: number }).optional(), fall: z.object({ hole: pit, started: number }).optional() })),
+  tools: z.array(z.object({ kind: z.enum(["shovel", "broom", "weapon"]), owner: z.string().optional() })).max(3).optional(),
   player: z.object({ x: number, y: number, z: number, vy: number, buried: shape.optional() }),
 });
 export type WorldSave = z.infer<typeof saveSchema>;
-export function snapshot(holes: Pit[], tunnels: Tunnel[], trees: FallingTree[], player: Body, time: number): WorldSave {
-  return saveSchema.parse({ version: 1, savedAt: Date.now(), holes, tunnels, trees, player, time });
+export function snapshot(holes: Pit[], tunnels: Tunnel[], trees: FallingTree[], tools: Tool[], player: Body, time: number): WorldSave {
+  return saveSchema.parse({ version: 1, savedAt: Date.now(), holes, tunnels, trees, tools, player, time });
 }
 export function parseSave(value: unknown): WorldSave | null {
   const result = saveSchema.safeParse(value);

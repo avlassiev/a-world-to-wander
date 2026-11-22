@@ -5,6 +5,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { acceptPose, turnTowards, walkSwing, type Peer, type PlayerPose } from "./multiplayer";
 import { type Body } from "./world";
 import { TimberPiece } from "./Timber";
+import { ToolPiece } from "./Tools";
+import { heldTool, type Tool } from "./tools";
 
 export function Avatar({ id, peers, local = false }: { id: string; peers: RefObject<Map<string, Peer>>; local?: boolean }) {
   const body = useRef<THREE.Group>(null);
@@ -14,6 +16,7 @@ export function Avatar({ id, peers, local = false }: { id: string; peers: RefObj
   const leftArm = useRef<THREE.Group>(null);
   const rightArm = useRef<THREE.Group>(null);
   const log = useRef<THREE.Group>(null);
+  const hand = useRef<THREE.Group>(null);
   const initialized = useRef(false);
   const phase = useRef(0);
   const colors = useMemo(() => {
@@ -27,6 +30,7 @@ export function Avatar({ id, peers, local = false }: { id: string; peers: RefObj
     if (!peer || !group) return;
     const pose = peer.pose;
     if (log.current) log.current.visible = pose.carrying;
+    if (hand.current) for (const child of hand.current.children) child.visible = child.name === `tool-${pose.tool}`;
     group.visible = !pose.buried && performance.now() - peer.received < 8000;
     const blend = local ? 1 : 1 - Math.exp(-15 * Math.min(delta, 0.1));
     if (!initialized.current || Math.hypot(group.position.x - pose.x, group.position.z - pose.z) > 8) {
@@ -50,6 +54,9 @@ export function Avatar({ id, peers, local = false }: { id: string; peers: RefObj
   });
   return <group ref={body} name={local ? "local-player" : `remote-player-${id}`}>
     <group ref={log} visible={false} position={[0, 0.98, -0.45]} scale={0.65}><TimberPiece /></group>
+    <group ref={hand} position={[0.42, 0.95, -0.15]} rotation={[0.4, 0, -0.2]}>
+      {(["shovel", "broom", "weapon"] as const).map((k) => <group key={k} name={`tool-${k}`} visible={false} scale={0.7}><ToolPiece kind={k} /></group>)}
+    </group>
     <mesh position={[0, 1.08, 0]} castShadow><boxGeometry args={[0.48, 0.62, 0.28]} /><meshStandardMaterial color={colors.shirt} /></mesh>
     <group ref={head} position={[0, 1.53, 0]}>
       <mesh castShadow><sphereGeometry args={[0.22, 12, 10]} /><meshStandardMaterial color={colors.skin} /></mesh>
@@ -67,7 +74,7 @@ export function Avatar({ id, peers, local = false }: { id: string; peers: RefObj
   </group>;
 }
 
-export function Multiplayer({ playing, pos, peers, carrying }: { playing: boolean; pos: RefObject<Body>; peers: RefObject<Map<string, Peer>>; carrying: RefObject<number> }) {
+export function Multiplayer({ playing, pos, peers, carrying, tools, owner }: { playing: boolean; pos: RefObject<Body>; peers: RefObject<Map<string, Peer>>; carrying: RefObject<number>; tools: RefObject<Tool[]>; owner: RefObject<string> }) {
   const { camera, scene } = useThree();
   const [ids, setIds] = useState<string[]>([]);
   useEffect(() => {
@@ -113,8 +120,9 @@ export function Multiplayer({ playing, pos, peers, carrying }: { playing: boolea
         id, seq: ++seq, x: pos.current.x, y: pos.current.y, z: pos.current.z,
         yaw: Math.atan2(-direction.x, -direction.z), pitch: Math.asin(Math.max(-1, Math.min(1, direction.y))),
         moving, buried: !!pos.current.buried, carrying: carrying.current >= 0,
+        tool: heldTool(tools.current, owner.current),
       };
-      const changed = !previous || Math.hypot(pose.x - previous.x, pose.y - previous.y, pose.z - previous.z) > 0.005 || Math.abs(pose.yaw - previous.yaw) > 0.005 || Math.abs(pose.pitch - previous.pitch) > 0.005 || pose.moving !== previous.moving || pose.buried !== previous.buried || pose.carrying !== previous.carrying;
+      const changed = !previous || Math.hypot(pose.x - previous.x, pose.y - previous.y, pose.z - previous.z) > 0.005 || Math.abs(pose.yaw - previous.yaw) > 0.005 || Math.abs(pose.pitch - previous.pitch) > 0.005 || pose.moving !== previous.moving || pose.buried !== previous.buried || pose.carrying !== previous.carrying || pose.tool !== previous.tool;
       if (changed || now - lastSent > 2000) {
         void channel.send({ type: "broadcast", event: "pose", payload: pose });
         previous = pose;
@@ -148,6 +156,6 @@ export function Multiplayer({ playing, pos, peers, carrying }: { playing: boolea
       setIds([]);
       if (import.meta.env.DEV && window.__game) delete window.__game.avatars;
     };
-  }, [playing, camera, scene, pos, peers, carrying]);
+  }, [playing, camera, scene, pos, peers, carrying, tools, owner]);
   return <>{ids.map((id) => <Avatar key={id} id={id} peers={peers} />)}</>;
 }

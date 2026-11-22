@@ -11,6 +11,7 @@ const poseSchema = z.object({
   moving: z.boolean(),
   buried: z.boolean(),
   carrying: z.boolean().default(false),
+  tool: z.enum(["shovel", "broom", "weapon"]).nullable().default(null),
 });
 
 export type PlayerPose = z.infer<typeof poseSchema>;

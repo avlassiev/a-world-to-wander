@@ -1,13 +1,16 @@
 import { parseSave, type WorldSave } from "./save";
 import { attractTrees, createTrees, digHole, digTunnel, explodeTree, fillHole, recoverTrees, type Body } from "./world";
 import { cutTree, pickTimber, dropTimber } from "./timber";
+import { defaultTools, returnTool, takeTool, type ToolKind } from "./tools";
 
-export type WorldEdit = { kind: "dig" | "fill" | "tunnel" | "blast" | "cut" | "pickup" | "drop"; x: number; z: number; id: number; time: number; player: Body; owner?: string };
+export type WorldEdit = { kind: "dig" | "fill" | "tunnel" | "blast" | "cut" | "pickup" | "drop" | "take-tool" | "return-tool"; x: number; z: number; id: number; time: number; player: Body; owner?: string; tool?: ToolKind };
 export function sharedSave(value: unknown, player: Body): WorldSave | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const saved = parseSave({ ...value, player });
   // Older worlds stored only the 40 nearby trees; distant visible trees now share the same rules.
   if (saved?.trees.length === 40) saved.trees.push(...createTrees().slice(40));
+  // Worlds saved before the shed existed get a full shelf.
+  if (saved && !saved.tools) saved.tools = defaultTools();
   return saved;
 }
 export function applyWorldEdit(saved: WorldSave, edit: WorldEdit): WorldSave {
@@ -29,6 +32,8 @@ export function applyWorldEdit(saved: WorldSave, edit: WorldEdit): WorldSave {
   else if (edit.kind === "cut") next.trees = cutTree(next.trees, edit.id, edit.time);
   else if (edit.kind === "pickup") next.trees = pickTimber(next.trees, edit.id, edit.player, edit.owner ?? "", edit.time);
   else if (edit.kind === "drop") next.trees = dropTimber(next.trees, edit.id, edit.player, edit.owner ?? "");
+  else if (edit.kind === "take-tool") next.tools = takeTool(next.tools ?? defaultTools(), edit.tool ?? "shovel", edit.player, edit.owner ?? "");
+  else if (edit.kind === "return-tool") next.tools = returnTool(next.tools ?? defaultTools(), edit.owner ?? "");
   else next.tunnels = digTunnel(next.holes, next.tunnels, edit.player, edit.x, edit.z);
   next.savedAt = Date.now();
   return next;

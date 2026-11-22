@@ -24,7 +24,22 @@ export const furniture: Box[] = [
   { x1: 3.2, z1: -10.2, x2: 3.8, z2: -8.6 }, // fridge + side counter
   { x1: 2.4, z1: -6.2, x2: 3.8, z2: -5.3 }, // bookshelf/cabinet
 ];
-const solids = [...walls, ...furniture];
+// Tool shed next to the house: x 6..9.6, z -11..-5. Door in the left wall (x=6) faces the house.
+export const SHED = { x1: 6, x2: 9.6, z1: -11, z2: -5, h: 2.6, t: 0.15 };
+export const SHED_DOOR = { z1: -8.6, z2: -7.4, h: 2.1 };
+export const SHELF = { x: 9.0, y: 1.05, z: -8 };
+const st = SHED.t;
+export const shedWalls: Box[] = [
+  { x1: SHED.x1, z1: SHED.z1, x2: SHED.x2, z2: SHED.z1 + st }, // back
+  { x1: SHED.x2 - st, z1: SHED.z1, x2: SHED.x2, z2: SHED.z2 }, // right
+  { x1: SHED.x1, z1: SHED.z2 - st, x2: SHED.x2, z2: SHED.z2 }, // front
+  { x1: SHED.x1, z1: SHED.z1, x2: SHED.x1 + st, z2: SHED_DOOR.z1 }, // left of door
+  { x1: SHED.x1, z1: SHED_DOOR.z2, x2: SHED.x1 + st, z2: SHED.z2 }, // right of door
+];
+export const shedFurniture: Box[] = [
+  { x1: 8.55, z1: -9.4, x2: 9.45, z2: -6.6 }, // tool shelf along the right wall
+];
+const solids = [...walls, ...furniture, ...shedWalls, ...shedFurniture];
 
 function hits(x: number, z: number) {
   if (inPond(x, z, RADIUS)) return true;
