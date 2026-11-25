@@ -13,6 +13,7 @@ import { TreeBursts } from "./TreeBursts";
 import { Timber } from "./Timber";
 import { TimberControls } from "./TimberControls";
 import { DayNight } from "./DayNight";
+import { DedMoroz, NewYearControls } from "./NewYear";
 import { CUT_SECONDS, carriedTree, cutTree, nearbyTimber, pickTimber, dropTimber, timberOwner } from "./timber";
 import { defaultTools, heldTool, nextFreeTool, releaseOrphanedTools, returnTool, takeTool, type Tool, type ToolKind } from "./tools";
 import { Shed, HeldTool, ToolControls } from "./Tools";
@@ -769,6 +770,7 @@ export default function World() {
         </mesh>
         <House />
         <Shed tools={toolsRef} />
+        <DedMoroz pos={playerRef} override={skyOverrideRef} />
         <Ponds />
         <Horizon />
         <Growth holes={holesRef} trees={treesRef} time={timeRef} advance={advanceRef} />
@@ -792,6 +794,7 @@ export default function World() {
       {locked && <div className="game-crosshair" />}
       {ready && <Button className="game-tool game-camera-tool" aria-label={thirdPerson ? "Вид глазами" : "Вид от третьего лица"} title={thirdPerson ? "Вид глазами" : "Вид от третьего лица"} aria-pressed={thirdPerson} onClick={() => { thirdPersonRef.current = !thirdPersonRef.current; setThirdPerson(thirdPersonRef.current); enter(); }}>{thirdPerson ? <Eye /> : <PersonStanding />}</Button>}
       {ready && <TimberControls trees={treesRef} player={playerRef} direction={directionRef} time={timeRef} carrying={carryingRef} saw={() => { enter(); onSaw(directionRef.current.x, directionRef.current.z); }} take={() => { enter(); onCarry(); }} />}
+      {ready && <NewYearControls override={skyOverrideRef} after={enter} />}
       {ready && <ToolControls tools={toolsRef} player={playerRef} owner={ownerRef} onUse={(kind) => { enter(); onTool(kind); }} />}
     </div>
   );

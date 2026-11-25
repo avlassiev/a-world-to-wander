@@ -204,3 +204,13 @@
 .game-tool svg { width: 34px; height: 34px; }
 .game-camera-tool { position: absolute; top: 20px; right: 20px; z-index: 20; }
 @media (max-width: 480px) { .game-timber-tools { bottom: 16px; right: 16px; gap: 10px; } .game-shed-tools { bottom: 16px; left: 16px; gap: 10px; } .game-tool { width: 58px; height: 58px; } .game-tool-badge { font-size: 32px; } }
+.game-newyear { position: absolute; top: 20px; left: 20px; z-index: 20; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.game-newyear-count { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: color-mix(in oklab, var(--background) 80%, transparent); font-size: 30px; }
+.game-newyear-count b { font-size: 34px; color: var(--foreground); }
+.game-newyear-dots { display: flex; gap: 3px; }
+.game-newyear-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.game-newyear-dots i[data-on] { background: var(--primary); }
+.game-newyear-mine { position: absolute; right: -6px; bottom: -6px; font-size: 22px; }
+.game-newyear-gifts { display: grid; grid-template-columns: repeat(3, auto); gap: 8px; }
+.game-newyear-gifts [data-on] { outline: 4px solid var(--primary); }
+.game-newyear-visit { font-size: 64px; padding: 4px 16px; border-radius: 24px; background: color-mix(in oklab, var(--background) 80%, transparent); }
