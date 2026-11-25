@@ -29,7 +29,7 @@ export function DedMoroz({ pos, override }: { pos: RefObject<Body>; override: Re
     <mesh position={[0, 1.85, 0]}><coneGeometry args={[0.24, 0.45, 10]} /><meshStandardMaterial color="#c62828" /></mesh>
     <mesh position={[0, 2.1, 0]}><sphereGeometry args={[0.07, 8, 6]} /><meshStandardMaterial color="#ffffff" /></mesh>
     <mesh position={[0.6, 0.9, 0]}><cylinderGeometry args={[0.03, 0.03, 1.8]} /><meshStandardMaterial color="#cfd8dc" /></mesh>
-    {[[-0.8, 0.5], [-0.5, 0.9], [-1.1, 0.8]].map(([x, z]) => <group key={`${x}${z}`} position={[x, 0.2, z]}>
+    {([[-0.8, 0.5], [-0.5, 0.9], [-1.1, 0.8]] as const).map(([x, z]) => <group key={`${x}${z}`} position={[x, 0.2, z]}>
       <mesh castShadow><boxGeometry args={[0.4, 0.4, 0.4]} /><meshStandardMaterial color="#2e7d32" /></mesh>
       <mesh><boxGeometry args={[0.42, 0.42, 0.08]} /><meshStandardMaterial color="#fdd835" /></mesh>
     </group>)}
