@@ -14,10 +14,10 @@ export function calendarAt(seconds: number) {
   return { year, day, daysLeft: DAYS_PER_YEAR - day, secondsLeft: YEAR_SECONDS - into, visiting: into < VISIT_SECONDS };
 }
 
-/** A wish written during year Y is delivered on New Year at the start of Y+1; no wish, no visit. */
+/** A wish written during year Y (or while Ded Moroz is still visiting) is delivered; no wish, no gift. */
 export function santaVisit(seconds: number, wishes: Record<number, string>) {
   const { year, visiting } = calendarAt(seconds);
   if (!visiting) return null;
-  const gift = wishes[year - 1];
+  const gift = wishes[year - 1] ?? wishes[year];
   return gift ? { gift } : { gift: null };
 }

@@ -15,7 +15,9 @@ describe("years and Ded Moroz", () => {
   });
   it("brings nothing to whoever did not write a list", () => {
     expect(santaVisit(YEAR_SECONDS + 5, {})).toEqual({ gift: null });
-    expect(santaVisit(YEAR_SECONDS + 5, { 1: "🧸" })).toEqual({ gift: null });
+  });
+  it("still brings the gift when the list is written while he is visiting", () => {
+    expect(santaVisit(YEAR_SECONDS + 5, { 1: "🚗" })).toEqual({ gift: "🚗" });
   });
   it("does not come in the middle of the year", () => {
     expect(santaVisit(YEAR_SECONDS + VISIT_SECONDS + 1, { 0: "🧸" })).toBeNull();
