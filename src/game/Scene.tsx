@@ -13,7 +13,9 @@ import { TreeBursts } from "./TreeBursts";
 import { Timber } from "./Timber";
 import { TimberControls } from "./TimberControls";
 import { DayNight } from "./DayNight";
-import { DedMoroz, NewYearControls } from "./NewYear";
+import { DedMoroz, GiftBox, NewYearControls, readWishes } from "./NewYear";
+import { dropGift, giftBox, MOROZ_X, MOROZ_Z, nearGift, readGifts, takeGift, writeGifts, type GiftState } from "./gifts";
+import { calendarAt } from "./calendar";
 import { CUT_SECONDS, carriedTree, cutTree, nearbyTimber, pickTimber, dropTimber, timberOwner } from "./timber";
 import { defaultTools, heldTool, nextFreeTool, releaseOrphanedTools, returnTool, takeTool, type Tool, type ToolKind } from "./tools";
 import { Shed, HeldTool, ToolControls } from "./Tools";
@@ -31,7 +33,8 @@ declare global {
       avatars?: () => unknown[];
       camera?: () => { thirdPerson: boolean; x: number; y: number; z: number; yaw: number; pitch: number };
       tool?: (kind?: ToolKind) => void;
-      readonly state: { player: Body; carrying: number; tool: string | null; tools: Tool[]; players: Peer["pose"][]; holes: Hole[]; tunnels: Tunnel[]; furnishings: ReturnType<typeof tunnelFurnishings>; trees: (ReturnType<typeof treePose> & { buried: boolean; destroyed: boolean; cut: boolean; timber: FallingTree["timber"] })[] };
+      gift?: () => void;
+      readonly state: { player: Body; carrying: number; tool: string | null; tools: Tool[]; gift: GiftState | null; players: Peer["pose"][]; holes: Hole[]; tunnels: Tunnel[]; furnishings: ReturnType<typeof tunnelFurnishings>; trees: (ReturnType<typeof treePose> & { buried: boolean; destroyed: boolean; cut: boolean; timber: FallingTree["timber"] })[] };
     };
   }
 }
@@ -266,7 +269,7 @@ function Growth({ holes, trees, time, advance }: { holes: React.RefObject<Hole[]
   );
 }
 
-function Player({ onDig, onFill, onTunnel, onSaw, onCarry, onTool, direction, holes, tunnels, pos, advance, thirdPerson, carrying, tool, ownerKey }: { onDig: (x: number, z: number) => void; onFill: (x: number, z: number) => void; onTunnel: (x: number, z: number) => void; onSaw: (x: number, z: number) => void; onCarry: () => void; onTool: () => void; direction: React.RefObject<{ x: number; z: number }>; holes: React.RefObject<Hole[]>; tunnels: React.RefObject<Tunnel[]>; pos: React.RefObject<Body>; advance: React.RefObject<(dt: number) => void>; thirdPerson: React.RefObject<boolean>; carrying: React.RefObject<number>; tool: React.RefObject<Tool[]>; ownerKey: React.RefObject<string> }) {
+function Player({ onDig, onFill, onTunnel, onSaw, onCarry, onTool, onGift, direction, holes, tunnels, pos, advance, thirdPerson, carrying, tool, ownerKey }: { onDig: (x: number, z: number) => void; onFill: (x: number, z: number) => void; onTunnel: (x: number, z: number) => void; onSaw: (x: number, z: number) => void; onCarry: () => void; onTool: () => void; onGift: () => void; direction: React.RefObject<{ x: number; z: number }>; holes: React.RefObject<Hole[]>; tunnels: React.RefObject<Tunnel[]>; pos: React.RefObject<Body>; advance: React.RefObject<(dt: number) => void>; thirdPerson: React.RefObject<boolean>; carrying: React.RefObject<number>; tool: React.RefObject<Tool[]>; ownerKey: React.RefObject<string> }) {
   const { camera, scene } = useThree();
   const self = useRef(new Map<string, Peer>());
   const ray = useMemo(() => new THREE.Raycaster(), []);
@@ -289,6 +292,7 @@ function Player({ onDig, onFill, onTunnel, onSaw, onCarry, onTool, direction, ho
       if (e.target instanceof HTMLInputElement) return;
       keys.current[e.code] = true;
       if (e.code === "KeyG" && !e.repeat) onTool();
+      if (e.code === "KeyH" && !e.repeat) onGift();
       if (["KeyE", "KeyF", "KeyT", "KeyV", "KeyR"].includes(e.code) && !e.repeat) {
         const dir = new THREE.Vector3();
         camera.getWorldDirection(dir); dir.y = 0; dir.normalize();
@@ -311,7 +315,7 @@ function Player({ onDig, onFill, onTunnel, onSaw, onCarry, onTool, direction, ho
     window.addEventListener("keydown", d); window.addEventListener("keyup", u); window.addEventListener("blur", reset);
     document.addEventListener("pointerlockchange", reset);
     return () => { window.removeEventListener("keydown", d); window.removeEventListener("keyup", u); window.removeEventListener("blur", reset); document.removeEventListener("pointerlockchange", reset); };
-  }, [camera, onDig, onFill, onTunnel, onSaw, onCarry, onTool, holes, pos]);
+  }, [camera, onDig, onFill, onTunnel, onSaw, onCarry, onTool, onGift, holes, pos]);
   const f = new THREE.Vector3(), r = new THREE.Vector3();
   const tick = (dt: number) => {
     const k = keys.current;
@@ -331,7 +335,7 @@ function Player({ onDig, onFill, onTunnel, onSaw, onCarry, onTool, direction, ho
       const obstacles = ray.intersectObjects(scene.children, true).filter((hit) => {
         let object: THREE.Object3D | null = hit.object;
         while (object) {
-          if (!object.visible || object.name === "local-player" || object.name.startsWith("remote-player-") || object.name === "carried-timber") return false;
+          if (!object.visible || object.name === "local-player" || object.name.startsWith("remote-player-") || object.name === "carried-timber" || object.name === "carried-gift" || object.name.startsWith("gift-")) return false;
           object = object.parent;
         }
         if (!(hit.object instanceof THREE.Mesh)) return false;
@@ -547,6 +551,7 @@ export default function World() {
   const ownerRef = useRef("");
   const carryingRef = useRef(-1);
   const toolsRef = useRef<Tool[]>(defaultTools());
+  const giftRef = useRef<GiftState | null>(null);
   const peersRef = useRef(new Map<string, Peer>());
   const playerAdvanceRef = useRef<(dt: number) => void>(() => {});
   const saveRef = useRef<(edit?: WorldEdit) => void>(() => {});
@@ -559,6 +564,11 @@ export default function World() {
     let seenRevision = -1;
     let canonical = snapshot([], [], createTrees(), playerRef.current, 0);
     try { ownerRef.current = timberOwner(localStorage); } catch { ownerRef.current = crypto.randomUUID(); }
+    try {
+      const stored = readGifts()[calendarAt(Date.now() / 1000).year];
+      // Reopening never leaves the gift floating in the player's hands: it waits where it was.
+      giftRef.current = stored ? { ...stored, carried: false } : null;
+    } catch { giftRef.current = null; }
     try {
       const stored = JSON.parse(localStorage.getItem("forest-shared-player") ?? "null");
       const parsed = sharedSave(canonical, stored);
@@ -718,6 +728,26 @@ export default function World() {
     toolsRef.current = takeTool(toolsRef.current, kind, playerRef.current, ownerRef.current);
     saveRef.current({ kind: "take-tool", x: 0, z: 0, id: 0, time: timeRef.current, player: { ...playerRef.current }, owner: ownerRef.current, tool: kind });
   }, []);
+  const onGift = useCallback(() => {
+    const pos = playerRef.current;
+    if (pos.buried) return;
+    const held = giftRef.current;
+    if (held?.carried) {
+      giftRef.current = dropGift(held, pos);
+      writeGifts({ ...readGifts(), [held.year]: giftRef.current });
+      return;
+    }
+    if (held && nearGift(pos, held.x, held.z)) {
+      giftRef.current = { ...held, carried: true };
+      writeGifts({ ...readGifts(), [held.year]: giftRef.current });
+      return;
+    }
+    const seconds = skyOverrideRef.current ?? Date.now() / 1000;
+    const box = giftBox(seconds, readWishes(), readGifts());
+    if (!box || !nearGift(pos, pos.x + MOROZ_X - 0.9, pos.z + MOROZ_Z + 0.7)) return;
+    giftRef.current = takeGift(box, pos);
+    writeGifts({ ...readGifts(), [box.year]: giftRef.current });
+  }, []);
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const previousView = window.__game?.view;
@@ -726,16 +756,17 @@ export default function World() {
       fill: onFill,
       tunnel: onTunnel,
       tool: onTool,
+      gift: onGift,
       sky: (seconds) => { skyOverrideRef.current = seconds; },
       sim: (seconds) => {
         advanceRef.current(seconds);
         for (let remaining = seconds; remaining > 0; remaining -= 1 / 60) playerAdvanceRef.current(Math.min(remaining, 1 / 60));
       },
       ...(previousView ? { view: previousView } : {}),
-      get state() { return { player: { ...playerRef.current }, carrying: carryingRef.current, tool: heldTool(toolsRef.current, ownerRef.current), tools: toolsRef.current, players: [...peersRef.current.values()].map((peer) => peer.pose), holes: holesRef.current, tunnels: tunnelsRef.current, furnishings: tunnelFurnishings(tunnelsRef.current), trees: treesRef.current.map((tr) => ({ ...treePose(tr, timeRef.current), buried: !!tr.buried, destroyed: !!tr.destroyed, cut: tr.cutAt !== undefined, timber: tr.timber })) }; },
+      get state() { return { player: { ...playerRef.current }, carrying: carryingRef.current, tool: heldTool(toolsRef.current, ownerRef.current), tools: toolsRef.current, gift: giftRef.current, players: [...peersRef.current.values()].map((peer) => peer.pose), holes: holesRef.current, tunnels: tunnelsRef.current, furnishings: tunnelFurnishings(tunnelsRef.current), trees: treesRef.current.map((tr) => ({ ...treePose(tr, timeRef.current), buried: !!tr.buried, destroyed: !!tr.destroyed, cut: tr.cutAt !== undefined, timber: tr.timber })) }; },
     };
     return () => { delete window.__game; };
-  }, [onDig, onFill, onTunnel, onTool]);
+  }, [onDig, onFill, onTunnel, onTool, onGift]);
   const { grass } = useTextures();
   useEffect(() => {
     const pause = (event: KeyboardEvent) => {
@@ -771,12 +802,13 @@ export default function World() {
         <House />
         <Shed tools={toolsRef} />
         <DedMoroz pos={playerRef} override={skyOverrideRef} />
+        <GiftBox pos={playerRef} override={skyOverrideRef} gift={giftRef} thirdPerson={thirdPersonRef} direction={directionRef} />
         <Ponds />
         <Horizon />
         <Growth holes={holesRef} trees={treesRef} time={timeRef} advance={advanceRef} />
         <TreeBursts trees={treesRef} time={timeRef} />
         <Timber trees={treesRef} time={timeRef} carrying={carryingRef} thirdPerson={thirdPersonRef} />
-        <Player onDig={onDig} onFill={onFill} onTunnel={onTunnel} onSaw={onSaw} onCarry={onCarry} onTool={onTool} direction={directionRef} holes={holesRef} tunnels={tunnelsRef} pos={playerRef} advance={playerAdvanceRef} thirdPerson={thirdPersonRef} carrying={carryingRef} tool={toolsRef} ownerKey={ownerRef} />
+        <Player onDig={onDig} onFill={onFill} onTunnel={onTunnel} onSaw={onSaw} onCarry={onCarry} onTool={onTool} onGift={onGift} direction={directionRef} holes={holesRef} tunnels={tunnelsRef} pos={playerRef} advance={playerAdvanceRef} thirdPerson={thirdPersonRef} carrying={carryingRef} tool={toolsRef} ownerKey={ownerRef} />
         <HeldTool tools={toolsRef} owner={ownerRef} thirdPerson={thirdPersonRef} />
         <Holes holes={holes} tunnels={tunnels} />
         <TunnelFurniture tunnels={tunnels} />
@@ -794,7 +826,7 @@ export default function World() {
       {locked && <div className="game-crosshair" />}
       {ready && <Button className="game-tool game-camera-tool" aria-label={thirdPerson ? "Вид глазами" : "Вид от третьего лица"} title={thirdPerson ? "Вид глазами" : "Вид от третьего лица"} aria-pressed={thirdPerson} onClick={() => { thirdPersonRef.current = !thirdPersonRef.current; setThirdPerson(thirdPersonRef.current); enter(); }}>{thirdPerson ? <Eye /> : <PersonStanding />}</Button>}
       {ready && <TimberControls trees={treesRef} player={playerRef} direction={directionRef} time={timeRef} carrying={carryingRef} saw={() => { enter(); onSaw(directionRef.current.x, directionRef.current.z); }} take={() => { enter(); onCarry(); }} />}
-      {ready && <NewYearControls override={skyOverrideRef} after={enter} />}
+      {ready && <NewYearControls override={skyOverrideRef} after={enter} pos={playerRef} gift={giftRef} onGift={onGift} />}
       {ready && <ToolControls tools={toolsRef} player={playerRef} owner={ownerRef} onUse={(kind) => { enter(); onTool(kind); }} />}
     </div>
   );
