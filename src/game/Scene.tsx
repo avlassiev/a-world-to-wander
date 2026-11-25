@@ -13,8 +13,8 @@ import { TreeBursts } from "./TreeBursts";
 import { Timber } from "./Timber";
 import { TimberControls } from "./TimberControls";
 import { DayNight } from "./DayNight";
-import { DedMoroz, GiftBox, NewYearControls, readWishes } from "./NewYear";
-import { dropGift, giftBox, MOROZ_X, MOROZ_Z, nearGift, readGifts, takeGift, writeGifts, type GiftState } from "./gifts";
+import { DedMoroz, GiftBox, NewYearControls, PaintMarks, readWishes } from "./NewYear";
+import { biteCandy, canPaint, openGift, dropGift, giftBox, MOROZ_X, MOROZ_Z, nearGift, readGifts, takeGift, writeGifts, type GiftState } from "./gifts";
 import { calendarAt } from "./calendar";
 import { CUT_SECONDS, carriedTree, cutTree, nearbyTimber, pickTimber, dropTimber, timberOwner } from "./timber";
 import { defaultTools, heldTool, nextFreeTool, releaseOrphanedTools, returnTool, takeTool, type Tool, type ToolKind } from "./tools";
@@ -34,6 +34,7 @@ declare global {
       camera?: () => { thirdPerson: boolean; x: number; y: number; z: number; yaw: number; pitch: number };
       tool?: (kind?: ToolKind) => void;
       gift?: () => void;
+      use?: () => void;
       readonly state: { player: Body; carrying: number; tool: string | null; tools: Tool[]; gift: GiftState | null; players: Peer["pose"][]; holes: Hole[]; tunnels: Tunnel[]; furnishings: ReturnType<typeof tunnelFurnishings>; trees: (ReturnType<typeof treePose> & { buried: boolean; destroyed: boolean; cut: boolean; timber: FallingTree["timber"] })[] };
     };
   }
@@ -738,7 +739,7 @@ export default function World() {
       writeGifts({ ...readGifts(), [held.year]: giftRef.current });
       return;
     }
-    if (held && nearGift(pos, held.x, held.z)) {
+    if (held && !held.eaten && nearGift(pos, held.x, held.z)) {
       giftRef.current = { ...held, carried: true };
       writeGifts({ ...readGifts(), [held.year]: giftRef.current });
       return;
@@ -749,13 +750,25 @@ export default function World() {
     giftRef.current = takeGift(box, pos);
     writeGifts({ ...readGifts(), [box.year]: giftRef.current });
   }, []);
+  const paintRef = useRef<(() => void) | null>(null);
+  /** Open a held gift, bite the lollipop, or paint with the paints. */
+  const onUse = useCallback(() => {
+    const held = giftRef.current;
+    if (!held?.carried) return;
+    if (!held.opened) giftRef.current = openGift(held);
+    else if (held.gift === "🍭") giftRef.current = biteCandy(held);
+    else if (canPaint(held)) { paintRef.current?.(); return; }
+    else return;
+    writeGifts({ ...readGifts(), [held.year]: giftRef.current });
+  }, []);
   /** With a hidden cursor the ✋ button can't be clicked, so a click in the game takes or drops a nearby gift. */
   const onGiftClick = useCallback(() => {
     const pos = playerRef.current, held = giftRef.current;
+    if (held?.carried && (!held.opened || held.gift === "🍭" || held.gift === "🎨")) { onUse(); return; }
     const seconds = skyOverrideRef.current ?? Date.now() / 1000;
     const box = giftBox(seconds, readWishes(), readGifts());
-    if (held?.carried || (held && nearGift(pos, held.x, held.z)) || (box && nearGift(pos, pos.x + MOROZ_X - 0.9, pos.z + MOROZ_Z + 0.7))) onGift();
-  }, [onGift]);
+    if (held?.carried || (held && !held.eaten && nearGift(pos, held.x, held.z)) || (box && nearGift(pos, pos.x + MOROZ_X - 0.9, pos.z + MOROZ_Z + 0.7))) onGift();
+  }, [onGift, onUse]);
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const previousView = window.__game?.view;
@@ -765,6 +778,7 @@ export default function World() {
       tunnel: onTunnel,
       tool: onTool,
       gift: onGift,
+      use: onUse,
       sky: (seconds) => { skyOverrideRef.current = seconds; },
       sim: (seconds) => {
         advanceRef.current(seconds);
@@ -774,7 +788,7 @@ export default function World() {
       get state() { return { player: { ...playerRef.current }, carrying: carryingRef.current, tool: heldTool(toolsRef.current, ownerRef.current), tools: toolsRef.current, gift: giftRef.current, players: [...peersRef.current.values()].map((peer) => peer.pose), holes: holesRef.current, tunnels: tunnelsRef.current, furnishings: tunnelFurnishings(tunnelsRef.current), trees: treesRef.current.map((tr) => ({ ...treePose(tr, timeRef.current), buried: !!tr.buried, destroyed: !!tr.destroyed, cut: tr.cutAt !== undefined, timber: tr.timber })) }; },
     };
     return () => { delete window.__game; };
-  }, [onDig, onFill, onTunnel, onTool, onGift]);
+  }, [onDig, onFill, onTunnel, onTool, onGift, onUse]);
   const { grass } = useTextures();
   useEffect(() => {
     const pause = (event: KeyboardEvent) => {
@@ -810,6 +824,7 @@ export default function World() {
         <House />
         <Shed tools={toolsRef} />
         <DedMoroz pos={playerRef} override={skyOverrideRef} />
+        <PaintMarks paintRef={paintRef} />
         <GiftBox pos={playerRef} override={skyOverrideRef} gift={giftRef} thirdPerson={thirdPersonRef} direction={directionRef} />
         <Ponds />
         <Horizon />
@@ -834,7 +849,7 @@ export default function World() {
       {locked && <div className="game-crosshair" />}
       {ready && <Button className="game-tool game-camera-tool" aria-label={thirdPerson ? "Вид глазами" : "Вид от третьего лица"} title={thirdPerson ? "Вид глазами" : "Вид от третьего лица"} aria-pressed={thirdPerson} onClick={() => { thirdPersonRef.current = !thirdPersonRef.current; setThirdPerson(thirdPersonRef.current); enter(); }}>{thirdPerson ? <Eye /> : <PersonStanding />}</Button>}
       {ready && <TimberControls trees={treesRef} player={playerRef} direction={directionRef} time={timeRef} carrying={carryingRef} saw={() => { enter(); onSaw(directionRef.current.x, directionRef.current.z); }} take={() => { enter(); onCarry(); }} />}
-      {ready && <NewYearControls override={skyOverrideRef} after={enter} pos={playerRef} gift={giftRef} onGift={onGift} />}
+      {ready && <NewYearControls override={skyOverrideRef} after={enter} pos={playerRef} gift={giftRef} onGift={onGift} onUse={onUse} />}
       {ready && <ToolControls tools={toolsRef} player={playerRef} owner={ownerRef} onUse={(kind) => { enter(); onTool(kind); }} />}
     </div>
   );

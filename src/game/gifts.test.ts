@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DAYS_PER_YEAR, YEAR_SECONDS } from "./calendar";
 import { DAY_NIGHT_SECONDS } from "./daylight";
-import { dropGift, giftBox, GIFT_REACH, nearGift, takeGift } from "./gifts";
+import { addPaint, biteCandy, canPaint, dropGift, giftBox, GIFT_REACH, MAX_PAINT, nearGift, openGift, takeGift } from "./gifts";
 import type { Body } from "./world";
 
 const at = (x: number, z: number, extra: Partial<Body> = {}): Body => ({ x, y: 0, z, vy: 0, ...extra });
@@ -46,5 +46,30 @@ describe("takeGift / dropGift", () => {
     expect(held).toMatchObject({ year: 1, gift: "🚗", carried: true });
     const dropped = dropGift(held, at(10, -2));
     expect(dropped).toMatchObject({ gift: "🚗", x: 10, z: -2, carried: false });
+  });
+});
+
+describe("opening gifts", () => {
+  const held = (gift: string) => takeGift({ year: 1, gift }, at(0, 0));
+  it("a lollipop is eaten in three bites", () => {
+    let g = openGift(held("🍭"));
+    g = biteCandy(g); g = biteCandy(g);
+    expect(g.eaten).toBeFalsy();
+    g = biteCandy(g);
+    expect(g).toMatchObject({ eaten: true, carried: false });
+  });
+  it("an unopened lollipop cannot be bitten", () => {
+    expect(biteCandy(held("🍭")).bites).toBeUndefined();
+  });
+  it("only opened paints in hands can paint", () => {
+    expect(canPaint(held("🎨"))).toBe(false);
+    expect(canPaint(openGift(held("🎨")))).toBe(true);
+    expect(canPaint(openGift(held("🧸")))).toBe(false);
+  });
+  it("keeps at most MAX_PAINT marks", () => {
+    const m = { x: 0, y: 0, z: 0, nx: 0, ny: 1, nz: 0, color: "#fff" };
+    let marks: ReturnType<typeof addPaint> = [];
+    for (let i = 0; i < MAX_PAINT + 5; i++) marks = addPaint(marks, m);
+    expect(marks.length).toBe(MAX_PAINT);
   });
 });
