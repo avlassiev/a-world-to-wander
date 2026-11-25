@@ -1,7 +1,7 @@
 import { DAY_NIGHT_SECONDS } from "./daylight";
 
-/** Wall-clock years: each game day is one month, so New Year comes for everyone at the same moment. */
-export const DAYS_PER_YEAR = 12;
+/** Wall-clock years: a short year of a few game days, so New Year comes for everyone at the same moment. */
+export const DAYS_PER_YEAR = 3;
 export const YEAR_SECONDS = DAYS_PER_YEAR * DAY_NIGHT_SECONDS;
 /** Ded Moroz stays for the whole first day of the new year. */
 export const VISIT_SECONDS = DAY_NIGHT_SECONDS;
