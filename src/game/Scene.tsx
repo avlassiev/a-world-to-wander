@@ -502,12 +502,13 @@ function Ready({ onReady }: { onReady: () => void }) {
   return null;
 }
 
-function MouseLook({ playing }: { playing: boolean }) {
+function MouseLook({ playing, onLockedClick }: { playing: boolean; onLockedClick?: () => void }) {
   const { camera, gl } = useThree();
   useEffect(() => {
     let dragging = false;
-    const down = () => {
+    const down = (event: MouseEvent) => {
       dragging = true;
+      if (playing && event.button === 0 && document.pointerLockElement === gl.domElement) onLockedClick?.();
       if (playing && document.pointerLockElement !== gl.domElement) {
         try { void gl.domElement.requestPointerLock()?.catch(() => {}); } catch { /* Drag-to-look remains available. */ }
       }
@@ -527,7 +528,7 @@ function MouseLook({ playing }: { playing: boolean }) {
       window.removeEventListener("mouseup", up);
       window.removeEventListener("mousemove", look);
     };
-  }, [camera, gl, playing]);
+  }, [camera, gl, playing, onLockedClick]);
   return null;
 }
 
@@ -748,6 +749,13 @@ export default function World() {
     giftRef.current = takeGift(box, pos);
     writeGifts({ ...readGifts(), [box.year]: giftRef.current });
   }, []);
+  /** With a hidden cursor the ✋ button can't be clicked, so a click in the game takes or drops a nearby gift. */
+  const onGiftClick = useCallback(() => {
+    const pos = playerRef.current, held = giftRef.current;
+    const seconds = skyOverrideRef.current ?? Date.now() / 1000;
+    const box = giftBox(seconds, readWishes(), readGifts());
+    if (held?.carried || (held && nearGift(pos, held.x, held.z)) || (box && nearGift(pos, pos.x + MOROZ_X - 0.9, pos.z + MOROZ_Z + 0.7))) onGift();
+  }, [onGift]);
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     const previousView = window.__game?.view;
@@ -812,7 +820,7 @@ export default function World() {
         <HeldTool tools={toolsRef} owner={ownerRef} thirdPerson={thirdPersonRef} />
         <Holes holes={holes} tunnels={tunnels} />
         <TunnelFurniture tunnels={tunnels} />
-        <MouseLook playing={locked} />
+        <MouseLook playing={locked} onLockedClick={onGiftClick} />
         <Multiplayer playing={locked} pos={playerRef} peers={peersRef} carrying={carryingRef} tools={toolsRef} owner={ownerRef} />
         <Ready onReady={() => setReady(true)} />
       </Canvas>}
