@@ -208,3 +208,17 @@ describe("filling holes", () => {
     expect(fillHole([pit], [], 20, 20).holes).toEqual([pit]);
   });
 });
+
+import { step as stuckStep } from "./world";
+describe("never stuck", () => {
+  it("walks out of a wall it ended up inside", () => {
+    const b = stuckStep({ x: 0, y: 0, z: -10.9, vy: 0 }, 0, 0.5, false, [], 0.016);
+    expect(b.z).toBeCloseTo(-10.4);
+  });
+  it("returns to the surface when underground with nothing around", () => {
+    expect(stuckStep({ x: 20, y: -3, z: 20, vy: 0 }, 0, 0, false, [], 0.016).y).toBe(0);
+  });
+  it("recovers from a broken position", () => {
+    expect(stuckStep({ x: NaN, y: 0, z: 0, vy: 0 }, 0, 0, false, [], 0.016).x).toBe(0);
+  });
+});

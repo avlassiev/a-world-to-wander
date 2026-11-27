@@ -41,15 +41,17 @@ export const shedFurniture: Box[] = [
 ];
 const solids = [...walls, ...furniture, ...shedWalls, ...shedFurniture];
 
-function hits(x: number, z: number) {
-  if (inPond(x, z, RADIUS)) return true;
-  return solids.some((b) => x + RADIUS > b.x1 && x - RADIUS < b.x2 && z + RADIUS > b.z1 && z - RADIUS < b.z2);
+function hits(x: number, z: number, rad = RADIUS) {
+  if (inPond(x, z, rad)) return true;
+  return solids.some((b) => x + rad > b.x1 && x - rad < b.x2 && z + rad > b.z1 && z - rad < b.z2);
 }
 
 /** Moves with per-axis sliding against walls. */
 export function move(x: number, z: number, dx: number, dz: number) {
-  const nx = hits(x + dx, z) ? x : x + dx;
-  const nz = hits(nx, z + dz) ? z : z + dz;
+  // Already overlapping something (e.g. after a save or edit): let the player walk out instead of freezing.
+  const free = hits(x, z, RADIUS * 0.5);
+  const nx = !free && hits(x + dx, z) ? x : x + dx;
+  const nz = !free && hits(nx, z + dz) ? z : z + dz;
   const L = 500;
   return { x: Math.max(-L, Math.min(L, nx)), z: Math.max(-L, Math.min(L, nz)) };
 }
@@ -251,6 +253,7 @@ export function holeAt<H extends HoleShape>(holes: H[], x: number, z: number): H
 
 /** One physics step: horizontal move (walls of a hole block you while below ground), gravity, jump. */
 export function step(b: Body, dx: number, dz: number, jump: boolean, holes: HoleShape[], dt: number, tunnels: Tunnel[] = []): Body {
+  if (![b.x, b.y, b.z, b.vy].every(Number.isFinite)) return { x: 0, y: 0, z: 0, vy: 0 };
   let { x, y, z, vy } = b;
   if (b.buried) {
     const bottom = -b.buried.d;
@@ -263,12 +266,15 @@ export function step(b: Body, dx: number, dz: number, jump: boolean, holes: Hole
   }
   if (y < -0.05) {
     const furniture = tunnelFurnishings(tunnels).flatMap((t) => y >= t.floor - 0.1 && y < t.floor + 0.95 ? [t.table, t.kitchen, t.toilet, ...t.chairs] : []);
-    const fits = (px: number, pz: number) => {
-      if (furniture.some((b) => px + RADIUS > b.x1 && px - RADIUS < b.x2 && pz + RADIUS > b.z1 && pz - RADIUS < b.z2)) return false;
+    const fits = (px: number, pz: number, rad = RADIUS) => {
+      if (furniture.some((b) => px + rad > b.x1 && px - rad < b.x2 && pz + rad > b.z1 && pz - rad < b.z2)) return false;
       return holes.some((h) => y >= -h.d - 0.1 && Math.hypot(px - h.x, pz - h.z) <= h.r - RADIUS * 0.5) || !!tunnelAt(tunnels, px, pz, y, RADIUS * 0.5);
     };
-    if (fits(x + dx, z)) x += dx;
-    if (fits(x, z + dz)) z += dz;
+    // Underground with nothing around (pit filled, passage gone): return to the surface.
+    if (!holes.some((h) => Math.hypot(x - h.x, z - h.z) < h.r + 0.5) && !tunnelAt(tunnels, x, z, y)) return { x, y: 0, z, vy: 0 };
+    const free = !fits(x, z, RADIUS * 0.5);
+    if (free || fits(x + dx, z)) x += dx;
+    if (free || fits(x, z + dz)) z += dz;
   } else {
     ({ x, z } = move(x, z, dx, dz));
   }
